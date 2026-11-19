@@ -306,7 +306,7 @@ class MainActivity : ComponentActivity() {
                             if (lyrics.isNotEmpty()) {
                                 LazyColumn(
                                     state = listState,
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
                                     contentPadding = PaddingValues(vertical = 18.dp, horizontal = 24.dp),
                                     verticalArrangement = Arrangement.spacedBy(24.dp)
                                 ) {
