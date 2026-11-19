@@ -3,12 +3,9 @@ package com.littlebird.synclyrics
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
-import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
 import android.provider.Settings
-import android.provider.MediaStore
-import android.os.Environment
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
@@ -158,18 +155,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        LaunchedEffect(Unit) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !migrationPrefs.getBoolean("legacy_migrated", false)) {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        publicLibrary.migrateLegacy(lyricsDb.all())
-                        lyricsDb.close()
-                        context.deleteDatabase("synclyrics.db")
-                        migrationPrefs.edit().putBoolean("legacy_migrated", true).apply()
-                    }
-                }.onFailure { error = it.message ?: "Could not migrate the old offline library." }
-            }
-        }
+
         var positionNow by remember { mutableLongStateOf(0L) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
         LaunchedEffect(accessRefresh) { hasAccess = hasNotificationAccess() }
@@ -534,26 +520,3 @@ private fun makeLrcFileName(title: String, artist: String): String {
     return "$safe.lrc"
 }
 
-private fun exportLrcToDownloads(context: Context, title: String, artist: String, content: String) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-        throw IllegalStateException("Public Downloads export requires Android 10 or newer.")
-    }
-    val values = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, makeLrcFileName(title, artist))
-        put(MediaStore.Downloads.MIME_TYPE, "application/x-lrc")
-        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SyncLyrics")
-        put(MediaStore.Downloads.IS_PENDING, 1)
-    }
-    val resolver = context.contentResolver
-    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        ?: throw IllegalStateException("Could not create the LRC file in Downloads.")
-    try {
-        resolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
-            ?: throw IllegalStateException("Could not write the LRC file.")
-        val completed = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-        resolver.update(uri, completed, null, null)
-    } catch (e: Exception) {
-        resolver.delete(uri, null, null)
-        throw e
-    }
-}
