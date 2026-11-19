@@ -353,6 +353,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("EXIT", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         }
+                        }
 
                         Column(
                             modifier = Modifier.fillMaxSize().padding(bottom = 58.dp),
@@ -401,6 +402,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        if (playbackControlsVisible) {
                         Row(
                             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                                 .padding(horizontal = 28.dp, vertical = 4.dp),
@@ -427,7 +429,6 @@ class MainActivity : ComponentActivity() {
                                     .setPackage(packageName).putExtra("command", "next"))
                             }) { Text("⏭", fontSize = 30.sp, color = Color.White) }
                         }
-
                         }
                         if (gestureSide.isNotBlank()) {
                             Surface(
