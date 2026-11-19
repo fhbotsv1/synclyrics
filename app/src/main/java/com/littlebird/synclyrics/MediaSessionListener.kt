@@ -25,9 +25,9 @@ class MediaSessionListener : NotificationListenerService() {
         refreshSessions()
     }
     private val callback = object : MediaController.Callback() {
-        override fun onMetadataChanged(controller: MediaController, metadata: MediaMetadata?) { publishIfSelected(controller) }
-        override fun onPlaybackStateChanged(controller: MediaController, state: PlaybackState?) { publishIfSelected(controller) }
-        override fun onSessionDestroyed(controller: MediaController) { refreshSessions() }
+        override fun onMetadataChanged(metadata: MediaMetadata?) { publish(selected) }
+        override fun onPlaybackStateChanged(state: PlaybackState?) { publish(selected) }
+        override fun onSessionDestroyed() { refreshSessions() }
     }
 
     override fun onListenerConnected() {
@@ -64,10 +64,6 @@ class MediaSessionListener : NotificationListenerService() {
         selected = active.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
             ?: active.firstOrNull { it.metadata != null }
         publish(selected)
-    }
-
-    private fun publishIfSelected(controller: MediaController) {
-        if (selected?.sessionToken == controller.sessionToken) publish(controller)
     }
 
     private fun publish(controller: MediaController?) {
