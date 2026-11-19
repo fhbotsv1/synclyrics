@@ -1,8 +1,12 @@
 package com.littlebird.synclyrics
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioManager
+import android.media.projection.MediaProjectionManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -15,6 +19,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -29,6 +35,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,6 +54,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 private const val ACTION_MEDIA_UPDATE = "com.littlebird.synclyrics.MEDIA_UPDATE"
+private const val ACTION_VISUALIZER_LEVEL = "com.littlebird.synclyrics.VISUALIZER_LEVEL"
 
 data class LyricLine(val timeMs: Long, val text: String)
 data class PlayerInfo(
@@ -72,6 +81,14 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var onPlayerUpdate: ((PlayerInfo) -> Unit)? = null
+    private var onVisualizerLevel: ((Float) -> Unit)? = null
+    private val visualizerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_VISUALIZER_LEVEL) {
+                onVisualizerLevel?.invoke(intent.getFloatExtra("level", 0f).coerceIn(0f, 1f))
+            }
+        }
+    }
     private var playbackUiEnabled = false
 
     private fun setPlaybackUi(enabled: Boolean) {
@@ -104,6 +121,9 @@ class MainActivity : ComponentActivity() {
         val filter = IntentFilter(ACTION_MEDIA_UPDATE)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else { @Suppress("DEPRECATION") registerReceiver(mediaReceiver, filter) }
+        val visualizerFilter = IntentFilter(ACTION_VISUALIZER_LEVEL)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(visualizerReceiver, visualizerFilter, Context.RECEIVER_NOT_EXPORTED)
+        else { @Suppress("DEPRECATION") registerReceiver(visualizerReceiver, visualizerFilter) }
         sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(packageName))
     }
 
@@ -115,11 +135,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         runCatching { unregisterReceiver(mediaReceiver) }
+        runCatching { unregisterReceiver(visualizerReceiver) }
         super.onStop()
     }
 
     override fun onDestroy() {
         onPlayerUpdate = null
+        onVisualizerLevel = null
         super.onDestroy()
     }
 
@@ -142,6 +164,31 @@ class MainActivity : ComponentActivity() {
         var gestureValue by remember { mutableFloatStateOf(0f) }
         var playbackControlsVisible by remember { mutableStateOf(true) }
         var playbackControlsReset by remember { mutableIntStateOf(0) }
+        var visualizerEnabled by remember { mutableStateOf(context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).getBoolean("visualizer_enabled", false)) }
+        var audioLevel by remember { mutableFloatStateOf(0f) }
+        onVisualizerLevel = { audioLevel = it }
+        val projectionManager = remember { context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager }
+        val projectionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+                val serviceIntent = Intent(context, AudioCaptureService::class.java).apply {
+                    putExtra(AudioCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(AudioCaptureService.EXTRA_RESULT_DATA, result.data)
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
+                visualizerEnabled = true
+                context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).edit().putBoolean("visualizer_enabled", true).apply()
+            } else {
+                visualizerEnabled = false
+                context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).edit().putBoolean("visualizer_enabled", false).apply()
+            }
+        }
+        val audioPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+            else {
+                visualizerEnabled = false
+                context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).edit().putBoolean("visualizer_enabled", false).apply()
+            }
+        }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
@@ -286,7 +333,7 @@ class MainActivity : ComponentActivity() {
             secondary = Color(0xFFB8F36B), background = Color(0xFF10120F),
             surface = Color(0xFF191D18), surfaceVariant = Color(0xFF252B23)
         )) {
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Surface(Modifier.fillMaxSize(), color = if (playbackMode) Color.Black else MaterialTheme.colorScheme.background) {
                 if (playbackMode) {
                     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
                     val originalScreenBrightness = remember { window.attributes.screenBrightness }
@@ -337,6 +384,25 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     ) {
+                        if (visualizerEnabled && Build.VERSION.SDK_INT >= 29) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                val bars = 44
+                                val gap = size.width * 0.009f
+                                val barWidth = (size.width - gap * (bars - 1)) / bars
+                                val centerY = size.height * 0.72f
+                                for (i in 0 until bars) {
+                                    val envelope = (0.22f + 0.78f * kotlin.math.abs(kotlin.math.sin(i * 0.31f + audioLevel * 8f)))
+                                    val height = (size.height * 0.42f * audioLevel * envelope).coerceAtLeast(2f)
+                                    val x = i * (barWidth + gap)
+                                    drawRoundRect(
+                                        color = Color(0xFFB8F36B).copy(alpha = (0.10f + audioLevel * 0.18f).coerceAtMost(0.28f)),
+                                        topLeft = Offset(x, centerY - height / 2f),
+                                        size = Size(barWidth, height),
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                    )
+                                }
+                            }
+                        }
                         if (playbackControlsVisible) {
                         Button(
                             onClick = {
@@ -469,7 +535,30 @@ class MainActivity : ComponentActivity() {
                                 color = if (hasAccess) Color(0xFFB8F36B) else Color(0xFFFFC078), fontSize = 10.sp, fontWeight = FontWeight.Bold) */
                         }
                     }
-                    Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text("MUSIC VISUALIZER", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(if (Build.VERSION.SDK_INT >= 29) "Real audio-reactive background in Playback" else "Requires Android 10 or newer", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = visualizerEnabled,
+                            enabled = Build.VERSION.SDK_INT >= 29,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                    } else {
+                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                } else {
+                                    visualizerEnabled = false
+                                    context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).edit().putBoolean("visualizer_enabled", false).apply()
+                                    context.startService(Intent(context, AudioCaptureService::class.java).setAction(AudioCaptureService.ACTION_STOP))
+                                }
+                            }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(22.dp)) {
                         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Text(if (player.title.isBlank()) "NOTHING PLAYING" else "NOW PLAYING",
