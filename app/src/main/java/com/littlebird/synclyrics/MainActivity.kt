@@ -533,7 +533,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp)) {
+                Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 18.dp, vertical = 12.dp)) {
                     Text(
                         "SYNC LYRICS",
                         modifier = Modifier.fillMaxWidth(),
@@ -570,6 +570,7 @@ class MainActivity : ComponentActivity() {
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                         Text(if (visualizerEnabled) "ON" else "OFF", fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(10.dp))
                         Switch(
                             checked = visualizerEnabled,
                             enabled = Build.VERSION.SDK_INT >= 29,
