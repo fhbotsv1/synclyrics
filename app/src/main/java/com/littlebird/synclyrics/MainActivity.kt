@@ -496,7 +496,7 @@ private fun formatTime(ms: Long): String {
 
 private fun makeLrcFileName(title: String, artist: String): String {
     val raw = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" - ").ifBlank { "Lyrics" }
-    val safe = raw.replace(Regex("[\\\\/:*?\\"<>|]"), "_").trim().take(120)
+    val safe = raw.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().take(120)
     return "$safe.lrc"
 }
 
