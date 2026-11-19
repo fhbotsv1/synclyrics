@@ -17,11 +17,15 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlin.concurrent.thread
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.ln
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * Captures only eligible media playback using Android's playback-capture API.
- * Audio is analysed in memory and is never stored or transmitted.
+ * Captures eligible playback audio for live visualisation.
+ * Samples are analysed in memory only; no audio is saved or transmitted.
  */
 class AudioCaptureService : Service() {
     companion object {
@@ -32,6 +36,7 @@ class AudioCaptureService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val TAG = "SyncLyricsCapture"
         private const val ACTION_LEVEL = "com.littlebird.synclyrics.VISUALIZER_LEVEL"
+        private const val BAND_COUNT = 28
     }
 
     @Volatile private var running = false
@@ -47,11 +52,7 @@ class AudioCaptureService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (Build.VERSION.SDK_INT < 29) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (running) return START_NOT_STICKY
+        if (Build.VERSION.SDK_INT < 29 || running) return START_NOT_STICKY
 
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -63,11 +64,11 @@ class AudioCaptureService : Service() {
             .build()
 
         try {
-            if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
             val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
             val data = if (Build.VERSION.SDK_INT >= 33) {
                 intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -106,8 +107,10 @@ class AudioCaptureService : Service() {
             .setSampleRate(sampleRate)
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .build()
-        val minBuffer = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        if (minBuffer <= 0) throw IllegalStateException("Audio capture is not supported on this device")
+        val minBuffer = AudioRecord.getMinBufferSize(
+            sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+        )
+        if (minBuffer <= 0) throw IllegalStateException("Audio capture is not supported")
         val audioRecord = AudioRecord.Builder()
             .setAudioFormat(format)
             .setBufferSizeInBytes(minBuffer * 2)
@@ -117,28 +120,59 @@ class AudioCaptureService : Service() {
             audioRecord.release()
             throw IllegalStateException("Could not initialise audio capture")
         }
+
         recorder = audioRecord
         running = true
         audioRecord.startRecording()
         captureThread = thread(name = "SyncLyricsAudioAnalysis", isDaemon = true) {
             val samples = ShortArray(1024)
+            val smoothed = FloatArray(BAND_COUNT)
+            val frequencies = FloatArray(BAND_COUNT) { index ->
+                val fraction = index.toFloat() / (BAND_COUNT - 1)
+                (70.0 * (7000.0 / 70.0).pow(fraction)).toFloat()
+            }
+            val coefficients = FloatArray(BAND_COUNT) { index ->
+                (2.0 * cos(2.0 * PI * frequencies[index] / sampleRate)).toFloat()
+            }
+
             while (running) {
-                val count = try { audioRecord.read(samples, 0, samples.size) } catch (_: Exception) { -1 }
+                val count = try {
+                    audioRecord.read(samples, 0, samples.size)
+                } catch (_: Exception) { -1 }
+
                 if (count > 0) {
-                    var sum = 0.0
-                    for (i in 0 until count) {
-                        val value = samples[i].toDouble() / 32768.0
-                        sum += value * value
+                    for (band in 0 until BAND_COUNT) {
+                        val coeff = coefficients[band]
+                        var q1 = 0f
+                        var q2 = 0f
+                        for (i in 0 until count) {
+                            val sample = samples[i] / 32768f
+                            val q0 = sample + coeff * q1 - q2
+                            q2 = q1
+                            q1 = q0
+                        }
+                        val power = (q1 * q1 + q2 * q2 - coeff * q1 * q2).coerceAtLeast(0f)
+                        val magnitude = (2f * sqrt(power) / count).coerceAtLeast(0f)
+                        val target = if (magnitude < 0.006f) 0f
+                            else ((magnitude * 7.5f).coerceIn(0f, 1f)).pow(0.72f)
+
+                        // Fast attack, slower release: movement stays fluid between beats.
+                        val smoothing = if (target > smoothed[band]) 0.48f else 0.13f
+                        smoothed[band] += (target - smoothed[band]) * smoothing
                     }
-                    val rms = sqrt(sum / count)
-                    val level = ((rms * 5.5).coerceIn(0.0, 1.0)).toFloat()
-                    sendBroadcast(Intent(ACTION_LEVEL).setPackage(packageName).putExtra("level", level))
+                    sendBroadcast(
+                        Intent(ACTION_LEVEL)
+                            .setPackage(packageName)
+                            .putExtra("bands", smoothed.copyOf())
+                    )
                 } else if (count < 0) {
                     Log.w(TAG, "AudioRecord read failed: $count")
                     break
                 }
             }
-            sendBroadcast(Intent(ACTION_LEVEL).setPackage(packageName).putExtra("level", 0f))
+            sendBroadcast(
+                Intent(ACTION_LEVEL).setPackage(packageName).putExtra("bands", FloatArray(BAND_COUNT))
+            )
         }
     }
 
@@ -150,7 +184,6 @@ class AudioCaptureService : Service() {
         runCatching { activeRecorder?.release() }
         val activeProjection = projection
         projection = null
-        // Clear our reference before stop(): MediaProjection.stop() invokes onStop().
         runCatching { activeProjection?.stop() }
         captureThread = null
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -158,7 +191,9 @@ class AudioCaptureService : Service() {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
-        sendBroadcast(Intent(ACTION_LEVEL).setPackage(packageName).putExtra("level", 0f))
+        sendBroadcast(
+            Intent(ACTION_LEVEL).setPackage(packageName).putExtra("bands", FloatArray(BAND_COUNT))
+        )
     }
 
     private fun createNotificationChannel() {
