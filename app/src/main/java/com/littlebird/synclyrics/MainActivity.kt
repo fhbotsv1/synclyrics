@@ -21,6 +21,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -159,6 +162,13 @@ class MainActivity : ComponentActivity() {
         val migrationPrefs = remember { context.getSharedPreferences("synclyrics_migration", Context.MODE_PRIVATE) }
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
+        var showSettings by remember { mutableStateOf(false) }
+        val settingsPrefs = remember { context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE) }
+        var syncOffsetMs by remember { mutableIntStateOf(settingsPrefs.getInt("lyrics_sync_offset_ms", 0).coerceIn(-5000, 5000)) }
+        var multicolorVisualizer by remember { mutableStateOf(settingsPrefs.getBoolean("visualizer_multicolor", false)) }
+        var lyricColorValue by remember { mutableLongStateOf(settingsPrefs.getLong("lyrics_color", 0xFFB8F36BL)) }
+        val lyricColorOptions = listOf("Lime" to 0xFFB8F36BL, "Cyan" to 0xFF55DDE0L, "Blue" to 0xFF6EA8F7L, "Purple" to 0xFFBE8CFFL, "Pink" to 0xFFFF80ABL, "Amber" to 0xFFFFC15AL, "White" to 0xFFFFFFFFL)
+        val lyricColor = Color(lyricColorValue)
         var playbackMode by remember { mutableStateOf(false) }
         var gestureSide by remember { mutableStateOf("") }
         var gestureValue by remember { mutableFloatStateOf(0f) }
@@ -325,7 +335,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val activeIndex = lyrics.indexOfLast { it.timeMs <= positionNow }.coerceAtLeast(0)
+        val adjustedLyricsPosition = (positionNow - syncOffsetMs).coerceAtLeast(0L)
+        val activeIndex = lyrics.indexOfLast { it.timeMs <= adjustedLyricsPosition }.coerceAtLeast(0)
         LaunchedEffect(activeIndex, lyrics.size) {
             if (lyrics.isNotEmpty()) listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
         }
@@ -397,7 +408,14 @@ class MainActivity : ComponentActivity() {
                                     val height = (size.height * 0.46f * level).coerceAtLeast(2f)
                                     val x = i * (barWidth + gap)
                                     drawRoundRect(
-                                        color = Color(0xFFB8F36B).copy(alpha = (0.08f + level * 0.30f).coerceAtMost(0.38f)),
+                                        color = if (multicolorVisualizer) {
+                                            Color.hsv(
+                                                hue = i.toFloat() / bars.coerceAtLeast(1) * 300f,
+                                                saturation = (0.35f + level * 0.65f).coerceIn(0f, 1f),
+                                                value = (0.22f + level * 0.78f).coerceIn(0f, 1f),
+                                                alpha = (0.08f + level * 0.62f).coerceAtMost(0.70f)
+                                            )
+                                        } else lyricColor.copy(alpha = (0.08f + level * 0.30f).coerceAtMost(0.38f)),
                                         topLeft = Offset(x, baseline - height),
                                         size = Size(barWidth, height),
                                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
@@ -448,7 +466,7 @@ class MainActivity : ComponentActivity() {
                                     fontSize = 46.sp,
                                     lineHeight = 55.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFB8F36B),
+                                    color = lyricColor,
                                     textAlign = TextAlign.Center,
                                     maxLines = 3
                                 )
@@ -529,6 +547,7 @@ class MainActivity : ComponentActivity() {
                                     showLibrary = true
                                 }
                             }) { Text("LIBRARY") }
+                            TextButton(onClick = { showSettings = true }) { Text("⚙ SETTINGS") }
                         }
                         Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B))
                         {
@@ -658,7 +677,7 @@ class MainActivity : ComponentActivity() {
                                     lineHeight = if (index == activeIndex) 35.sp else 28.sp,
                                     fontWeight = if (index == activeIndex) FontWeight.Bold else FontWeight.Medium,
                                     color = when {
-                                        index == activeIndex -> MaterialTheme.colorScheme.primary
+                                        index == activeIndex -> lyricColor
                                         index < activeIndex -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
                                         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
                                     }, textAlign = TextAlign.Center
@@ -730,6 +749,92 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     confirmButton = { TextButton(onClick = { showLibrary = false }) { Text("CLOSE") } }
+                )
+            }
+
+            if (showSettings) {
+                AlertDialog(
+                    onDismissRequest = { showSettings = false },
+                    title = { Text("Settings") },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("LYRICS SYNCHRONISATION", color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(
+                                when {
+                                    syncOffsetMs > 0 -> "Lyrics delayed by ${syncOffsetMs} ms"
+                                    syncOffsetMs < 0 -> "Lyrics advanced by ${-syncOffsetMs} ms"
+                                    else -> "No timing adjustment"
+                                },
+                                fontSize = 14.sp
+                            )
+                            Slider(
+                                value = syncOffsetMs.toFloat(),
+                                onValueChange = {
+                                    syncOffsetMs = it.roundToInt()
+                                    settingsPrefs.edit().putInt("lyrics_sync_offset_ms", syncOffsetMs).apply()
+                                },
+                                valueRange = -5000f..5000f,
+                                steps = 99
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("−5.0 s", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = {
+                                    syncOffsetMs = 0
+                                    settingsPrefs.edit().putInt("lyrics_sync_offset_ms", 0).apply()
+                                }) { Text("RESET") }
+                                Text("+5.0 s", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            HorizontalDivider()
+                            Text("VISUALIZER COLOUR", color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Multicolour audio mode", fontWeight = FontWeight.Medium)
+                                    Text("Stronger waves become brighter and more vivid",
+                                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(
+                                    checked = multicolorVisualizer,
+                                    onCheckedChange = {
+                                        multicolorVisualizer = it
+                                        settingsPrefs.edit().putBoolean("visualizer_multicolor", it).apply()
+                                    }
+                                )
+                            }
+                            Text("When off, the visualizer matches the lyric text colour.",
+                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            HorizontalDivider()
+                            Text("LYRICS TEXT COLOUR", color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                lyricColorOptions.forEach { (name, value) ->
+                                    FilterChip(
+                                        selected = lyricColorValue == value,
+                                        onClick = {
+                                            lyricColorValue = value
+                                            settingsPrefs.edit().putLong("lyrics_color", value).apply()
+                                        },
+                                        label = { Text(name) },
+                                        leadingIcon = {
+                                            Surface(modifier = Modifier.size(14.dp), shape = CircleShape, color = Color(value)) {}
+                                        }
+                                    )
+                                }
+                            }
+                            Text("The selected colour is used for the active lyric and, in matching mode, the visualizer.",
+                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showSettings = false }) { Text("DONE") } }
                 )
             }
         }
