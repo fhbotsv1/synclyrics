@@ -494,7 +494,7 @@ private suspend fun fetchLyrics(title: String, artist: String, album: String): L
         val candidateTitle = item.optString("trackName").lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
         val candidateArtist = item.optString("artistName").lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
         val score = (if (candidateTitle == normalizedTitle) 4 else if (candidateTitle.contains(normalizedTitle) || normalizedTitle.contains(candidateTitle)) 2 else 0) +
-            (if (normalizedArtist.isNotBlank() && candidateArtist == normalizedArtist) 4 else if (normalizedArtist.isNotBlank() && (candidateArtist.contains(normalizedArtist) || normalizedArtist.contains(candidateArtist))) 2 else 0)
+                (if (normalizedArtist.isNotBlank() && candidateArtist == normalizedArtist) 4 else if (normalizedArtist.isNotBlank() && (candidateArtist.contains(normalizedArtist) || normalizedArtist.contains(candidateArtist))) 2 else 0)
         Triple(score, index, synced)
     }.sortedByDescending { it.first }
     candidates.firstOrNull()?.third?.let { parseLrc(it) } ?: emptyList()
@@ -503,6 +503,7 @@ private suspend fun fetchLyrics(title: String, artist: String, album: String): L
 private fun serializeLrc(lines: List<LyricLine>): String = lines.joinToString("\n") { line ->
     val totalCentiseconds = line.timeMs.coerceAtLeast(0L) / 10L
     val minutes = totalCentiseconds / 6000
+
     val seconds = (totalCentiseconds / 100) % 60
     val centiseconds = totalCentiseconds % 100
     "[%02d:%02d.%02d]%s".format(Locale.ROOT, minutes, seconds, centiseconds, line.text)
@@ -513,10 +514,4 @@ private fun formatTime(ms: Long): String {
     return String.format(Locale.getDefault(), "%d:%02d", seconds / 60, seconds % 60)
 }
 
-
-private fun makeLrcFileName(title: String, artist: String): String {
-    val raw = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" - ").ifBlank { "Lyrics" }
-    val safe = raw.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().take(120)
-    return "$safe.lrc"
-}
 
