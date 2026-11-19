@@ -157,11 +157,20 @@ class MainActivity : ComponentActivity() {
 
 
         var positionNow by remember { mutableLongStateOf(0L) }
+        var lyricsReload by remember { mutableIntStateOf(0) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
         LaunchedEffect(accessRefresh) { hasAccess = hasNotificationAccess() }
         val listState = rememberLazyListState()
 
         fun applyPlayer(next: PlayerInfo) {
+            // Media-session refreshes and returning from the document picker can briefly
+            // produce an empty session update. Do not let that transient update erase
+            // the current song or its lyrics.
+            if (next.title.isBlank() && player.title.isNotBlank()) {
+                player = player.copy(playing = false)
+                return
+            }
+
             val changedSong = next.title != player.title || next.artist != player.artist
             player = next
             positionNow = next.position
@@ -195,7 +204,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val songKey = "${player.title.lowercase(Locale.ROOT)}|${player.artist.lowercase(Locale.ROOT)}"
-        LaunchedEffect(songKey) {
+        LaunchedEffect(songKey, lyricsReload) {
             if (player.title.isNotBlank()) {
                 loading = true
                 val cached = withContext(Dispatchers.IO) { publicLibrary.find(player.title, player.artist) }
@@ -371,7 +380,11 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("Open LRC") }
-                        OutlinedButton(onClick = { hasAccess = hasNotificationAccess(); context.sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(context.packageName)) }, modifier = Modifier.weight(1f)) { Text("Refresh player") }
+                        OutlinedButton(onClick = {
+                            hasAccess = hasNotificationAccess()
+                            context.sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(context.packageName))
+                            if (player.title.isNotBlank()) lyricsReload++
+                        }, modifier = Modifier.weight(1f)) { Text("Refresh player") }
                     }
                     Text("Playback is detected through Android media sessions. SyncLyrics does not record audio.",
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
