@@ -144,11 +144,14 @@ class AudioCaptureService : Service() {
 
     private fun stopCapture() {
         running = false
-        runCatching { recorder?.stop() }
-        runCatching { recorder?.release() }
+        val activeRecorder = recorder
         recorder = null
-        runCatching { projection?.stop() }
+        runCatching { activeRecorder?.stop() }
+        runCatching { activeRecorder?.release() }
+        val activeProjection = projection
         projection = null
+        // Clear our reference before stop(): MediaProjection.stop() invokes onStop().
+        runCatching { activeProjection?.stop() }
         captureThread = null
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
         else {
