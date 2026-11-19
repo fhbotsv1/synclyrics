@@ -1,22 +1,26 @@
-# Little Bird Tank Interpolation
+# SyncLyrics
 
-Android tank-volume calculator for sounding or ullage measurements, trim interpolation, and heel correction.
+An Android companion app that detects music playing in other apps and displays synchronized, line-by-line lyrics.
 
-## Stage 1
-- Application ID: `com.littlebird.interpolation`
+## Current foundation
 - Kotlin, Jetpack Compose and Material 3
-- Interpolation across two measurement references and two trim references
-- Linear heel-correction interpolation
-- Calculation breakdown and corrected volume in m³
+- Android MediaSession detection through user-enabled Notification Listener access
+- Reads current track metadata, playback state, position and duration
+- Fetches timestamped lyrics from LRCLIB when available
+- Imports local .lrc files as a fallback
+- Highlights and scrolls to the current lyric line
 - Minimum Android 8.0 (API 26), compile SDK 36, JDK 17
-- Target ABI: arm64-v8a only
+- Application ID: com.littlebird.synclyrics
 
-## Calculation
-1. Interpolate tank volume between the lower and upper sounding/ullage references at each trim reference.
-2. Interpolate those two volumes at the actual trim.
-3. Interpolate heel correction between the two heel references.
-4. Add heel correction to the trim-interpolated volume.
+## Setup
+1. Install and open SyncLyrics.
+2. Tap Enable notification access and allow SyncLyrics in Android Settings.
+3. Start music in another app that exposes an Android media session.
+4. Return to SyncLyrics. Track information and matching lyrics should appear.
+5. If online synced lyrics are unavailable, use Open LRC to import a timestamped lyrics file.
 
-Four corner volumes are required: two measurement references at each of two trim references. Enter values from the vessel's approved tank calibration table and verify results against the approved tables before operational use.
-
-Open in Android Studio, sync Gradle, then build and run on an arm64-v8a device.
+## Notes
+- Android does not provide a universal way for one app to inspect another app's audio. SyncLyrics uses Android's MediaSession APIs; it does not record or analyze audio.
+- Detection depends on the music app publishing a media session and the device allowing notification-listener access.
+- LRCLIB availability and network access are required for automatic online lyric lookup.
+- Local LRC files are supported for songs without an online match.
