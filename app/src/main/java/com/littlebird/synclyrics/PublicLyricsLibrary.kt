@@ -104,4 +104,10 @@ class PublicLyricsLibrary(private val context: Context) {
     private fun normalize(value: String) = value.lowercase(Locale.ROOT)
         .replace(Regex("\\([^)]*\\)|\\[[^]]*]"), " ")
         .replace(Regex("[^\\p{L}\\p{N}]"), "")
+
+    private fun makeLrcFileName(title: String, artist: String): String {
+        val raw = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" - ").ifBlank { "Lyrics" }
+        val safe = raw.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().take(120)
+        return "$safe.lrc"
+    }
 }
