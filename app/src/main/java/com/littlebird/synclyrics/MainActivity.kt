@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var onPlayerUpdate: ((PlayerInfo) -> Unit)? = null
+    private var hasAccessCache: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +76,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val filter = IntentFilter(ACTION_MEDIA_UPDATE)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else @Suppress("DEPRECATION") registerReceiver(mediaReceiver, filter)
+        else { @Suppress("DEPRECATION") registerReceiver(mediaReceiver, filter) }
+        sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(packageName))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hasAccessCache = hasNotificationAccess()
     }
 
     override fun onStop() {
@@ -95,6 +102,7 @@ class MainActivity : ComponentActivity() {
         var error by remember { mutableStateOf<String?>(null) }
         var positionNow by remember { mutableLongStateOf(0L) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
+        LaunchedEffect(hasAccessCache) { hasAccess = hasNotificationAccess() }
         val listState = rememberLazyListState()
 
         fun applyPlayer(next: PlayerInfo) {
@@ -113,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 runCatching {
                     withContext(Dispatchers.IO) {
                         context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                            ?: error("Unable to read this file.")
+                            ?: throw IllegalStateException("Unable to read this file.")
                     }
                 }.onSuccess { text ->
                     val parsed = parseLrc(text)
