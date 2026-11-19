@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var onPlayerUpdate: ((PlayerInfo) -> Unit)? = null
-    private var hasAccessCache: Boolean = false
+    private var accessRefresh by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        hasAccessCache = hasNotificationAccess()
+        accessRefresh++
     }
 
     override fun onStop() {
@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
         var error by remember { mutableStateOf<String?>(null) }
         var positionNow by remember { mutableLongStateOf(0L) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
-        LaunchedEffect(hasAccessCache) { hasAccess = hasNotificationAccess() }
+        LaunchedEffect(accessRefresh) { hasAccess = hasNotificationAccess() }
         val listState = rememberLazyListState()
 
         fun applyPlayer(next: PlayerInfo) {
