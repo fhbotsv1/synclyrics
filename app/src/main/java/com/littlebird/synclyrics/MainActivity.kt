@@ -230,6 +230,28 @@ class MainActivity : ComponentActivity() {
                                 if (!hasAccess) Button(onClick = {
                                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                                 }) { Text("Enable notification access") }
+                                if (player.title.isNotBlank()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                loading = true
+                                                lyricsMessage = "Searching LRCLIB…"
+                                                error = null
+                                                runCatching { fetchLyrics(player.title, player.artist, player.album) }
+                                                    .onSuccess { found ->
+                                                        lyrics = found
+                                                        lyricsMessage = if (found.isEmpty()) "No synced lyrics found. Try another version or import an LRC file." else "Synced lyrics"
+                                                    }
+                                                    .onFailure {
+                                                        lyricsMessage = "Lyrics search failed. Check your internet connection."
+                                                        error = it.message
+                                                    }
+                                                loading = false
+                                            }
+                                        },
+                                        enabled = !loading
+                                    ) { Text(if (loading) "Searching…" else "Search Lyrics") }
+                                }
                                 OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "application/octet-stream")) }) { Text("Import .LRC file") }
                                 if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                             }
@@ -291,23 +313,57 @@ private fun parseLrc(source: String): List<LyricLine> {
 }
 
 private suspend fun fetchLyrics(title: String, artist: String, album: String): List<LyricLine> = withContext(Dispatchers.IO) {
-    val query = listOf("track_name" to title, "artist_name" to artist, "album_name" to album)
-        .filter { it.second.isNotBlank() }
-        .joinToString("&") { "${it.first}=${URLEncoder.encode(it.second, "UTF-8")}" }
-    val connection = (URL("https://lrclib.net/api/get?$query").openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 10000
-        readTimeout = 10000
-        setRequestProperty("User-Agent", "SyncLyrics/1.0 (Android)")
+    fun encode(value: String) = URLEncoder.encode(value, "UTF-8")
+    fun requestJson(path: String): String? {
+        val connection = (URL("https://lrclib.net$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("User-Agent", "SyncLyrics/1.0 (Android)")
+            setRequestProperty("Accept", "application/json")
+        }
+        return try {
+            if (connection.responseCode !in 200..299) null
+            else connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
     }
-    try {
-        if (connection.responseCode !in 200..299) return@withContext emptyList()
-        val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-        val synced = json.optString("syncedLyrics")
-        if (synced.isNotBlank()) parseLrc(synced) else emptyList()
-    } finally {
-        connection.disconnect()
+
+    // First try LRCLIB's exact-match endpoint.
+    val exactQuery = buildList {
+        add("track_name=${encode(title)}")
+        if (artist.isNotBlank()) add("artist_name=${encode(artist)}")
+        if (album.isNotBlank()) add("album_name=${encode(album)}")
+    }.joinToString("&")
+    val exactJson = requestJson("/api/get?$exactQuery")
+    if (exactJson != null) {
+        val synced = JSONObject(exactJson).optString("syncedLyrics")
+        val parsed = if (synced.isNotBlank()) parseLrc(synced) else emptyList()
+        if (parsed.isNotEmpty()) return@withContext parsed
     }
+
+    // Exact matches are often absent because media players expose slightly different
+    // title/artist strings. Search the catalogue and select the closest synced result.
+    val searchQuery = buildList {
+        add("track_name=${encode(title)}")
+        if (artist.isNotBlank()) add("artist_name=${encode(artist)}")
+    }.joinToString("&")
+    val searchJson = requestJson("/api/search?$searchQuery") ?: return@withContext emptyList()
+    val results = org.json.JSONArray(searchJson)
+    val normalizedTitle = title.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+    val normalizedArtist = artist.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+    val candidates = (0 until results.length()).mapNotNull { index ->
+        val item = results.optJSONObject(index) ?: return@mapNotNull null
+        val synced = item.optString("syncedLyrics")
+        if (synced.isBlank()) return@mapNotNull null
+        val candidateTitle = item.optString("trackName").lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+        val candidateArtist = item.optString("artistName").lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+        val score = (if (candidateTitle == normalizedTitle) 4 else if (candidateTitle.contains(normalizedTitle) || normalizedTitle.contains(candidateTitle)) 2 else 0) +
+            (if (normalizedArtist.isNotBlank() && candidateArtist == normalizedArtist) 4 else if (normalizedArtist.isNotBlank() && (candidateArtist.contains(normalizedArtist) || normalizedArtist.contains(candidateArtist))) 2 else 0)
+        Triple(score, index, synced)
+    }.sortedByDescending { it.first }
+    candidates.firstOrNull()?.third?.let { parseLrc(it) } ?: emptyList()
 }
 
 private fun formatTime(ms: Long): String {
