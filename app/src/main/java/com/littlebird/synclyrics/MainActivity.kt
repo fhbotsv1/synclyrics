@@ -2,6 +2,7 @@ package com.littlebird.synclyrics
 
 import android.content.BroadcastReceiver
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -15,6 +16,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -133,6 +136,8 @@ class MainActivity : ComponentActivity() {
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
         var playbackMode by remember { mutableStateOf(false) }
+        var gestureSide by remember { mutableStateOf("") }
+        var gestureValue by remember { mutableFloatStateOf(0f) }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
@@ -272,7 +277,41 @@ class MainActivity : ComponentActivity() {
         )) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (playbackMode) {
-                    Box(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 16.dp)) {
+                    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+                    var brightness by remember {
+                        mutableFloatStateOf((window.attributes.screenBrightness.takeIf { it >= 0f } ?: 0.5f).coerceIn(0.01f, 1f))
+                    }
+                    Box(
+                        Modifier.fillMaxSize().pointerInput(playbackMode) {
+                            detectVerticalDragGestures(
+                                onDragStart = { offset ->
+                                    gestureSide = if (offset.x < size.width / 2f) "BRIGHTNESS" else "VOLUME"
+                                    gestureValue = if (gestureSide == "BRIGHTNESS") brightness
+                                        else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() /
+                                            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val adjustment = -dragAmount / size.height.coerceAtLeast(1).toFloat() * 1.2f
+                                    if (gestureSide == "BRIGHTNESS") {
+                                        brightness = (brightness + adjustment).coerceIn(0.01f, 1f)
+                                        val attributes = window.attributes
+                                        attributes.screenBrightness = brightness
+                                        window.attributes = attributes
+                                        gestureValue = brightness
+                                    } else if (gestureSide == "VOLUME") {
+                                        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                        val nextVolume = (currentVolume + (adjustment * maxVolume).toInt()).coerceIn(0, maxVolume)
+                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, nextVolume, 0)
+                                        gestureValue = nextVolume.toFloat() / maxVolume
+                                    }
+                                },
+                                onDragEnd = { gestureSide = "" },
+                                onDragCancel = { gestureSide = "" }
+                            )
+                        }
+                    ) {
                         Button(
                             onClick = {
                                 playbackMode = false
@@ -287,7 +326,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Column(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().padding(bottom = 58.dp),
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -330,6 +369,49 @@ class MainActivity : ComponentActivity() {
                                 }
                             } else {
                                 Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                .padding(horizontal = 28.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = {
+                                sendBroadcast(Intent("com.littlebird.synclyrics.MEDIA_CONTROL")
+                                    .setPackage(packageName).putExtra("command", "previous"))
+                            }) { Text("⏮", fontSize = 30.sp, color = Color.White) }
+                            Spacer(Modifier.width(34.dp))
+                            FilledIconButton(
+                                onClick = {
+                                    sendBroadcast(Intent("com.littlebird.synclyrics.MEDIA_CONTROL")
+                                        .setPackage(packageName).putExtra("command", "play_pause"))
+                                },
+                                modifier = Modifier.size(58.dp)
+                            ) {
+                                Text(if (player.playing) "Ⅱ" else "▶", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.width(34.dp))
+                            TextButton(onClick = {
+                                sendBroadcast(Intent("com.littlebird.synclyrics.MEDIA_CONTROL")
+                                    .setPackage(packageName).putExtra("command", "next"))
+                            }) { Text("⏭", fontSize = 30.sp, color = Color.White) }
+                        }
+
+                        if (gestureSide.isNotBlank()) {
+                            Surface(
+                                modifier = Modifier.align(
+                                    if (gestureSide == "BRIGHTNESS") Alignment.CenterStart else Alignment.CenterEnd
+                                ).padding(horizontal = 18.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xDD252B23)
+                            ) {
+                                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(if (gestureSide == "BRIGHTNESS") "☀" else "♪", fontSize = 22.sp, color = Color(0xFFB8F36B))
+                                    Text("${(gestureValue * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                                }
                             }
                         }
                     }
