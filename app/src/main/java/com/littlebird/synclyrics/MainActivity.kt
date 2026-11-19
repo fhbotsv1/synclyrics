@@ -578,6 +578,8 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = {
+                            playbackControlsVisible = true
+                            playbackControlsReset++
                             playbackMode = true
                             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                             setPlaybackUi(true)
