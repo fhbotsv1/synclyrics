@@ -19,6 +19,7 @@ class MediaSessionListener : NotificationListenerService() {
         private const val TAG = "MediaSessionListener"
         private const val ACTION_MEDIA_UPDATE = "com.littlebird.synclyrics.MEDIA_UPDATE"
         private const val ACTION_REFRESH_SESSIONS = "com.littlebird.synclyrics.REFRESH_SESSIONS"
+        private const val ACTION_MEDIA_CONTROL = "com.littlebird.synclyrics.MEDIA_CONTROL"
     }
 
     private var sessionManager: MediaSessionManager? = null
@@ -26,8 +27,9 @@ class MediaSessionListener : NotificationListenerService() {
 
     private val refreshReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_REFRESH_SESSIONS) {
-                updateActiveSessions()
+            when (intent?.action) {
+                ACTION_REFRESH_SESSIONS -> updateActiveSessions()
+                ACTION_MEDIA_CONTROL -> dispatchMediaCommand(intent.getStringExtra("command").orEmpty())
             }
         }
     }
@@ -120,6 +122,30 @@ class MediaSessionListener : NotificationListenerService() {
         }
         activeControllers.clear()
         broadcastEmptyState()
+    }
+
+    private fun dispatchMediaCommand(command: String) {
+        val controllers = activeControllers.keys.toList()
+        val controller = controllers.firstOrNull {
+            it.playbackState?.state == PlaybackState.STATE_PLAYING &&
+                !it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
+        } ?: controllers.firstOrNull {
+            !it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
+        } ?: controllers.firstOrNull() ?: return
+
+        runCatching {
+            when (command) {
+                "play_pause" -> {
+                    if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                        controller.transportControls.pause()
+                    } else {
+                        controller.transportControls.play()
+                    }
+                }
+                "previous" -> controller.transportControls.skipToPrevious()
+                "next" -> controller.transportControls.skipToNext()
+            }
+        }.onFailure { Log.e(TAG, "Could not send media command: $command", it) }
     }
 
     private fun broadcastBestControllerState(controllers: List<MediaController>) {
