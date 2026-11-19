@@ -12,7 +12,8 @@ data class SavedLyrics(
     val artist: String,
     val album: String,
     val lrc: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val fileUri: String? = null
 )
 
 class LyricsDatabase(context: Context) : SQLiteOpenHelper(context, "synclyrics.db", null, 1) {
