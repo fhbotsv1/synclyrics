@@ -533,34 +533,43 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            Text("SYNC", fontSize = 12.sp, letterSpacing = 4.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                            Text("Lyrics", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp)) {
+                    Text(
+                        "SYNC LYRICS",
+                        modifier = Modifier.fillMaxWidth(),
+                        fontSize = 25.sp,
+                        letterSpacing = 2.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { scanAndSync() }, modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp),
+                            shape = RoundedCornerShape(12.dp)) {
+                            Text("SCAN & SYNC", fontSize = 11.sp, maxLines = 1)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { scanAndSync() }) { Text("SCAN & SYNC") }
-                            TextButton(onClick = {
-                                scope.launch {
-                                    libraryItems = withContext(Dispatchers.IO) { publicLibrary.all() }
-                                    showLibrary = true
-                                }
-                            }) { Text("LIBRARY") }
-                            TextButton(onClick = { showSettings = true }) { Text("⚙ SETTINGS") }
+                        Button(onClick = {
+                            scope.launch {
+                                libraryItems = withContext(Dispatchers.IO) { publicLibrary.all() }
+                                showLibrary = true
+                            }
+                        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp),
+                            shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.filledTonalButtonColors()) {
+                            Text("LIBRARY", fontSize = 11.sp)
                         }
-                        Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B))
-                        {
-                           /* Text(if (hasAccess) "● ACCESS OK" else "● SETUP",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                color = if (hasAccess) Color(0xFFB8F36B) else Color(0xFFFFC078), fontSize = 10.sp, fontWeight = FontWeight.Bold) */
+                        Button(onClick = { showSettings = true }, modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp),
+                            shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.filledTonalButtonColors()) {
+                            Text("⚙ SETTINGS", fontSize = 11.sp, maxLines = 1)
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f)) {
-                            Text("MUSIC VISUALIZER", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text(if (Build.VERSION.SDK_INT >= 29) "Real audio-reactive background in Playback" else "Requires Android 10 or newer", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    Spacer(Modifier.height(5.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("MUSIC VISUALIZER", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                        Text(if (visualizerEnabled) "ON" else "OFF", fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Switch(
                             checked = visualizerEnabled,
                             enabled = Build.VERSION.SDK_INT >= 29,
@@ -579,29 +588,23 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(22.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text(if (player.title.isBlank()) "NOTHING PLAYING" else "NOW PLAYING",
-                                color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                            Text(player.title.ifBlank { "Play music in another app" }, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                            Text(player.artist.ifBlank { "Spotify • YouTube Music • VLC and more" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (player.packageName.isNotBlank()) Text(player.packageName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (player.duration > 0) {
-                                Spacer(Modifier.height(8.dp))
-                                LinearProgressIndicator(
-                                    progress = { (positionNow.toFloat() / player.duration).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(formatTime(positionNow), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(formatTime(player.duration), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
+                    Spacer(Modifier.height(5.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("NOW PLAYING", color = MaterialTheme.colorScheme.primary,
+                                fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+                            Text(player.title.ifBlank { "Play music in another app" },
+                                fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(player.artist.ifBlank { "Spotify • YouTube Music • VLC and more" },
+                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         }
                     }
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("LYRICS", fontSize = 11.sp, letterSpacing = 3.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text(lyricsMessage, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
@@ -700,8 +703,6 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text("▶  PLAYBACK", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                     }
-                    Text("Playback is detected through Android media sessions. SyncLyrics does not record audio.",
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
                 }
             }
