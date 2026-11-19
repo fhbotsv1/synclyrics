@@ -42,7 +42,7 @@ class MediaSessionListener : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         sessionManager = getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
-        val filter = IntentFilter(ACTION_REFRESH_SESSIONS)
+        val filter = IntentFilter(ACTION_REFRESH_SESSIONS).apply { addAction(ACTION_MEDIA_CONTROL) }
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             registerReceiver(refreshReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
