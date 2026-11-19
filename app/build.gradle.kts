@@ -4,10 +4,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 android {
-    namespace = "com.littlebird.interpolation"
+    namespace = "com.littlebird.synclyrics"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.littlebird.interpolation"
+        applicationId = "com.littlebird.synclyrics"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
