@@ -272,64 +272,64 @@ class MainActivity : ComponentActivity() {
         )) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (playbackMode) {
-                    Box(
-                        Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 12.dp)
-                    ) {
-                        Column(Modifier.fillMaxSize()) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        player.title,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        color = Color(0xFFB8F36B)
-                                    )
-                                    Text(
-                                        player.artist,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        color = Color.White.copy(alpha = 0.55f)
-                                    )
-                                }
-                                TextButton(onClick = {
-                                    playbackMode = false
-                                    setPlaybackUi(false)
-                                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                }) {
-                                    Text("⏻", fontSize = 25.sp, color = Color.White)
-                                }
-                            }
+                    Box(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 16.dp)) {
+                        Button(
+                            onClick = {
+                                playbackMode = false
+                                setPlaybackUi(false)
+                                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                            },
+                            modifier = Modifier.align(Alignment.TopEnd),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 7.dp),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("EXIT", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        }
+
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             if (lyrics.isNotEmpty()) {
-                                LazyColumn(
-                                    state = listState,
-                                    modifier = Modifier.fillMaxWidth().weight(1f),
-                                    contentPadding = PaddingValues(vertical = 18.dp, horizontal = 24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                                ) {
-                                    itemsIndexed(lyrics) { index, line ->
-                                        Text(
-                                            line.text,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            fontSize = if (index == activeIndex) 38.sp else 27.sp,
-                                            lineHeight = if (index == activeIndex) 46.sp else 34.sp,
-                                            fontWeight = if (index == activeIndex) FontWeight.Bold else FontWeight.Medium,
-                                            color = when {
-                                                index == activeIndex -> Color(0xFFB8F36B)
-                                                index < activeIndex -> Color.White.copy(alpha = 0.32f)
-                                                else -> Color.White.copy(alpha = 0.72f)
-                                            },
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
+                                if (activeIndex > 0) {
+                                    Text(
+                                        lyrics[activeIndex - 1].text,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        fontSize = 22.sp,
+                                        lineHeight = 29.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.42f),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2
+                                    )
+                                    Spacer(Modifier.height(22.dp))
+                                }
+                                Text(
+                                    lyrics[activeIndex].text,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    fontSize = 46.sp,
+                                    lineHeight = 55.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB8F36B),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 3
+                                )
+                                if (activeIndex < lyrics.lastIndex) {
+                                    Spacer(Modifier.height(22.dp))
+                                    Text(
+                                        lyrics[activeIndex + 1].text,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        fontSize = 22.sp,
+                                        lineHeight = 29.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2
+                                    )
                                 }
                             } else {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
-                                }
+                                Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
                             }
                         }
                     }
