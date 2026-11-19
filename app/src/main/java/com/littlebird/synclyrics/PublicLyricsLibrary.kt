@@ -57,7 +57,7 @@ class PublicLyricsLibrary(private val context: Context) {
 
     fun delete(item: SavedLyrics) {
         val folder = treeDocument() ?: return
-        folder.listFiles().firstOrNull { it.uri == item.fileUri }?.delete()
+        folder.listFiles().firstOrNull { it.uri == item.fileUri?.let(Uri::parse) }?.delete()
     }
 
     fun migrateLegacy(entries: List<SavedLyrics>): Int {
@@ -88,7 +88,7 @@ class PublicLyricsLibrary(private val context: Context) {
         val split = base.split(" - ", limit = 2)
         val title = titleTag?.takeIf { it.isNotBlank() } ?: split.first()
         val artist = artistTag.ifBlank { split.getOrNull(1).orEmpty() }
-        return SavedLyrics(uri.hashCode().toLong(), title, artist, albumTag, text, 0L, uri)
+        return SavedLyrics(uri.hashCode().toLong(), title, artist, albumTag, text, 0L, uri.toString())
     }
 
     private fun withMetadata(lrc: String, title: String, artist: String, album: String): String {
@@ -98,7 +98,7 @@ class PublicLyricsLibrary(private val context: Context) {
             if (artist.isNotBlank() && lines.none { it.trim().startsWith("[ar:", true) }) add("[ar:$artist]")
             if (album.isNotBlank() && lines.none { it.trim().startsWith("[al:", true) }) add("[al:$album]")
         }
-        return (prefix + lines).joinToString("\\n")
+        return (prefix + lines).joinToString("\n")
     }
 
     private fun normalize(value: String) = value.lowercase(Locale.ROOT)
