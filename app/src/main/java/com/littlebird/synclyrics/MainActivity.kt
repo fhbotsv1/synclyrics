@@ -110,24 +110,64 @@ class MainActivity : ComponentActivity() {
         var loading by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         val lyricsDb = remember { LyricsDatabase(context) }
+        val publicLibrary = remember { PublicLyricsLibrary(context) }
+        val migrationPrefs = remember { context.getSharedPreferences("synclyrics_migration", Context.MODE_PRIVATE) }
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
-        var pendingPublicExport by remember { mutableStateOf<String?>(null) }
-
-        val publicExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-lrc")) { uri: Uri? ->
-            val content = pendingPublicExport
-            pendingPublicExport = null
-            if (uri != null && content != null) {
+        val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            if (uri != null) {
+                publicLibrary.saveFolderAccess(uri)
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
-                                ?: throw IllegalStateException("Could not write the LRC file.")
+                            if (!migrationPrefs.getBoolean("legacy_migrated", false)) {
+                                publicLibrary.migrateLegacy(lyricsDb.all())
+                                lyricsDb.close()
+                                context.deleteDatabase("synclyrics.db")
+                                migrationPrefs.edit().putBoolean("legacy_migrated", true).apply()
+                            }
+                            publicLibrary.all()
                         }
-                    }.onSuccess { lyricsMessage = "Saved offline and exported to Files" }
-                        .onFailure { error = it.message ?: "Could not export LRC file." }
+                    }.onSuccess { libraryItems = it; lyricsMessage = "Folder scanned and library synced" }
+                        .onFailure { error = it.message ?: "Could not scan the selected folder." }
                 }
+            }
+        }
+
+        fun scanAndSync() {
+            if (!publicLibrary.hasFolderAccess()) {
+                folderPicker.launch(null)
+                return
+            }
+            scope.launch {
+                loading = true
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        if (!migrationPrefs.getBoolean("legacy_migrated", false)) {
+                            publicLibrary.migrateLegacy(lyricsDb.all())
+                            lyricsDb.close()
+                            context.deleteDatabase("synclyrics.db")
+                            migrationPrefs.edit().putBoolean("legacy_migrated", true).apply()
+                        }
+                        publicLibrary.all()
+                    }
+                }.onSuccess { libraryItems = it; lyricsMessage = "Scanned ${it.size} LRC file(s) — library synced" }
+                    .onFailure { error = it.message ?: "Scan & Sync failed." }
+                loading = false
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !migrationPrefs.getBoolean("legacy_migrated", false)) {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        publicLibrary.migrateLegacy(lyricsDb.all())
+                        lyricsDb.close()
+                        context.deleteDatabase("synclyrics.db")
+                        migrationPrefs.edit().putBoolean("legacy_migrated", true).apply()
+                    }
+                }.onFailure { error = it.message ?: "Could not migrate the old offline library." }
             }
         }
         var positionNow by remember { mutableLongStateOf(0L) }
@@ -159,7 +199,7 @@ class MainActivity : ComponentActivity() {
                     if (parsed.isEmpty()) error = "No timestamped lyric lines found in this LRC file."
                     else {
                         lyrics = parsed
-                        withContext(Dispatchers.IO) { lyricsDb.save(player.title.ifBlank { "Imported lyrics" }, player.artist, player.album, text) }
+                        withContext(Dispatchers.IO) { publicLibrary.write(player.title.ifBlank { "Imported lyrics" }, player.artist, player.album, text) }
                         isSaved = true
                         lyricsMessage = "Imported and saved offline"
                         error = null
@@ -172,7 +212,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(songKey) {
             if (player.title.isNotBlank()) {
                 loading = true
-                val cached = withContext(Dispatchers.IO) { lyricsDb.find(player.title, player.artist) }
+                val cached = withContext(Dispatchers.IO) { publicLibrary.find(player.title, player.artist) }
                 if (cached != null) {
                     lyrics = parseLrc(cached.lrc)
                     isSaved = lyrics.isNotEmpty()
@@ -220,12 +260,15 @@ class MainActivity : ComponentActivity() {
                             Text("SYNC", fontSize = 12.sp, letterSpacing = 4.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text("Lyrics", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                         }
-                        TextButton(onClick = {
-                            scope.launch {
-                                libraryItems = withContext(Dispatchers.IO) { lyricsDb.all() }
-                                showLibrary = true
-                            }
-                        }) { Text("LIBRARY") }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { scanAndSync() }) { Text("SCAN & SYNC") }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    libraryItems = withContext(Dispatchers.IO) { publicLibrary.all() }
+                                    showLibrary = true
+                                }
+                            }) { Text("LIBRARY") }
+                        }
                         Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B)) {
                             Text(if (hasAccess) "● ACCESS ENABLED" else "● SETUP REQUIRED",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -269,20 +312,11 @@ class MainActivity : ComponentActivity() {
                                         val lrcText = serializeLrc(lyrics)
                                         runCatching {
                                             withContext(Dispatchers.IO) {
-                                                lyricsDb.save(player.title, player.artist, player.album, lrcText)
-                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                                    exportLrcToDownloads(context, player.title, player.artist, lrcText)
-                                                }
+                                                publicLibrary.write(player.title, player.artist, player.album, lrcText)
                                             }
                                         }.onSuccess {
                                             isSaved = true
-                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                                lyricsMessage = "Saved offline and exported to Downloads/SyncLyrics"
-                                            } else {
-                                                pendingPublicExport = lrcText
-                                                publicExportLauncher.launch(makeLrcFileName(player.title, player.artist))
-                                                lyricsMessage = "Saved offline — choose where to save the LRC file"
-                                            }
+                                            lyricsMessage = "Saved to public Downloads/SyncLyrics"
                                         }.onFailure { error = it.message ?: "Could not save or export lyrics." }
                                     }
                                 }
@@ -382,8 +416,8 @@ class MainActivity : ComponentActivity() {
                                         }) { Text("LOAD") }
                                         TextButton(onClick = {
                                             scope.launch {
-                                                withContext(Dispatchers.IO) { lyricsDb.delete(item.id) }
-                                                libraryItems = withContext(Dispatchers.IO) { lyricsDb.all() }
+                                                withContext(Dispatchers.IO) { publicLibrary.delete(item) }
+                                                libraryItems = withContext(Dispatchers.IO) { publicLibrary.all() }
                                                 if (player.title == item.title && player.artist == item.artist) isSaved = false
                                             }
                                         }) { Text("DELETE", color = MaterialTheme.colorScheme.error) }
