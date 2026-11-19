@@ -42,6 +42,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -166,6 +167,14 @@ class MainActivity : ComponentActivity() {
         val settingsPrefs = remember { context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE) }
         var syncOffsetMs by remember { mutableIntStateOf(settingsPrefs.getInt("lyrics_sync_offset_ms", 0).coerceIn(-5000, 5000)) }
         var multicolorVisualizer by remember { mutableStateOf(settingsPrefs.getBoolean("visualizer_multicolor", false)) }
+        var visualizerStyle by remember { mutableStateOf(settingsPrefs.getString("visualizer_style", "Bars") ?: "Bars") }
+        var visualizerColorMode by remember { mutableStateOf(settingsPrefs.getString("visualizer_color_mode", if (settingsPrefs.getBoolean("visualizer_multicolor", false)) "Spectrum" else "Single") ?: "Single") }
+        var visualizerHeight by remember { mutableFloatStateOf(settingsPrefs.getFloat("visualizer_height", 46f).coerceIn(20f, 80f)) }
+        var visualizerSensitivity by remember { mutableFloatStateOf(settingsPrefs.getFloat("visualizer_sensitivity", 1f).coerceIn(0.5f, 2f)) }
+        var playbackFontSize by remember { mutableFloatStateOf(settingsPrefs.getFloat("playback_font_size", 46f).coerceIn(30f, 64f)) }
+        var playbackLineSpacing by remember { mutableFloatStateOf(settingsPrefs.getFloat("playback_line_spacing", 22f).coerceIn(8f, 40f)) }
+        var playbackVerticalPosition by remember { mutableFloatStateOf(settingsPrefs.getFloat("playback_vertical_position", 0f).coerceIn(-100f, 100f)) }
+        var playbackFontStyle by remember { mutableStateOf(settingsPrefs.getString("playback_font_style", "Default") ?: "Default") }
         var lyricColorValue by remember { mutableLongStateOf(settingsPrefs.getLong("lyrics_color", 0xFFB8F36BL)) }
         val lyricColorOptions = listOf("Lime" to 0xFFB8F36BL, "Cyan" to 0xFF55DDE0L, "Blue" to 0xFF6EA8F7L, "Purple" to 0xFFBE8CFFL, "Pink" to 0xFFFF80ABL, "Amber" to 0xFFFFC15AL, "White" to 0xFFFFFFFFL)
         val lyricColor = Color(lyricColorValue)
@@ -399,27 +408,75 @@ class MainActivity : ComponentActivity() {
                     ) {
                         if (visualizerEnabled && Build.VERSION.SDK_INT >= 29) {
                             Canvas(Modifier.fillMaxSize()) {
-                                val bars = audioBands.size
-                                val gap = size.width * 0.0065f
-                                val barWidth = (size.width - gap * (bars - 1)) / bars
-                                val baseline = size.height
-                                for (i in 0 until bars) {
-                                    val level = audioBands[i].coerceIn(0f, 1f)
-                                    val height = (size.height * 0.46f * level).coerceAtLeast(2f)
-                                    val x = i * (barWidth + gap)
-                                    drawRoundRect(
-                                        color = if (multicolorVisualizer) {
-                                            Color.hsv(
-                                                hue = i.toFloat() / bars.coerceAtLeast(1) * 300f,
-                                                saturation = (0.35f + level * 0.65f).coerceIn(0f, 1f),
-                                                value = (0.22f + level * 0.78f).coerceIn(0f, 1f),
-                                                alpha = (0.08f + level * 0.62f).coerceAtMost(0.70f)
-                                            )
-                                        } else lyricColor.copy(alpha = (0.08f + level * 0.30f).coerceAtMost(0.38f)),
-                                        topLeft = Offset(x, baseline - height),
-                                        size = Size(barWidth, height),
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                val bands = audioBands.size
+                                val centerY = size.height / 2f
+                                val maxBarHeight = size.height * (visualizerHeight / 100f)
+                                fun bandColor(index: Int, level: Float): Color = when (visualizerColorMode) {
+                                    "Spectrum" -> Color.hsv(
+                                        hue = index.toFloat() / bands.coerceAtLeast(1) * 300f,
+                                        saturation = (0.35f + level * 0.65f).coerceIn(0f, 1f),
+                                        value = (0.22f + level * 0.78f).coerceIn(0f, 1f),
+                                        alpha = (0.10f + level * 0.55f).coerceAtMost(0.65f)
                                     )
+                                    "Gradient" -> Color.hsv(
+                                        hue = (index.toFloat() / bands.coerceAtLeast(1) * 270f + 90f) % 360f,
+                                        saturation = 0.82f, value = 1f,
+                                        alpha = (0.12f + level * 0.48f).coerceAtMost(0.60f)
+                                    )
+                                    else -> lyricColor.copy(alpha = (0.08f + level * 0.34f).coerceAtMost(0.42f))
+                                }
+                                val levels = audioBands.map { (it * visualizerSensitivity).coerceIn(0f, 1f) }
+                                when (visualizerStyle) {
+                                    "Waveform" -> {
+                                        val stepX = size.width / (bands - 1).coerceAtLeast(1)
+                                        for (i in 0 until bands - 1) {
+                                            val y1 = centerY - (levels[i] - 0.08f) * maxBarHeight
+                                            val y2 = centerY - (levels[i + 1] - 0.08f) * maxBarHeight
+                                            drawLine(bandColor(i, levels[i]), Offset(i * stepX, y1),
+                                                Offset((i + 1) * stepX, y2), strokeWidth = 4.dp.toPx())
+                                        }
+                                    }
+                                    "Circular" -> {
+                                        val cx = size.width / 2f
+                                        val cy = size.height / 2f
+                                        val baseRadius = size.minDimension * 0.18f
+                                        val maxLength = size.minDimension * (visualizerHeight / 100f) * 0.42f
+                                        for (i in 0 until bands) {
+                                            val angle = (i.toFloat() / bands * Math.PI * 2.0 - Math.PI / 2.0)
+                                            val inner = baseRadius
+                                            val outer = inner + (maxLength * levels[i]).coerceAtLeast(2f)
+                                            drawLine(bandColor(i, levels[i]),
+                                                Offset(cx + kotlin.math.cos(angle).toFloat() * inner, cy + kotlin.math.sin(angle).toFloat() * inner),
+                                                Offset(cx + kotlin.math.cos(angle).toFloat() * outer, cy + kotlin.math.sin(angle).toFloat() * outer),
+                                                strokeWidth = 3.dp.toPx())
+                                        }
+                                    }
+                                    else -> {
+                                        val gap = size.width * 0.0065f
+                                        val barWidth = (size.width - gap * (bands - 1)) / bands
+                                        for (i in 0 until bands) {
+                                            val level = levels[i]
+                                            val barHeight = (maxBarHeight * level).coerceAtLeast(2f)
+                                            val x = i * (barWidth + gap)
+                                            val mirrored = visualizerStyle == "Mirrored Bars"
+                                            val top = if (mirrored) centerY - barHeight / 2f else size.height - barHeight
+                                            val height = if (mirrored) barHeight else barHeight
+                                            drawRoundRect(
+                                                color = bandColor(i, level),
+                                                topLeft = Offset(x, top),
+                                                size = Size(barWidth, height),
+                                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                            )
+                                            if (mirrored) {
+                                                drawRoundRect(
+                                                    color = bandColor(i, level),
+                                                    topLeft = Offset(x, centerY),
+                                                    size = Size(barWidth, barHeight / 2f),
+                                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -442,7 +499,8 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Column(
-                            modifier = Modifier.fillMaxSize().padding(bottom = 58.dp),
+                            modifier = Modifier.fillMaxSize().padding(bottom = 58.dp)
+                                .offset(y = playbackVerticalPosition.dp),
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -451,32 +509,47 @@ class MainActivity : ComponentActivity() {
                                     Text(
                                         lyrics[activeIndex - 1].text,
                                         modifier = Modifier.fillMaxWidth(),
-                                        fontSize = 22.sp,
-                                        lineHeight = 29.sp,
+                                        fontSize = (playbackFontSize * 0.48f).sp,
+                                        lineHeight = (playbackFontSize * 0.63f).sp,
+                                        fontFamily = when (playbackFontStyle) {
+                                            "Serif" -> FontFamily.Serif
+                                            "Monospace" -> FontFamily.Monospace
+                                            else -> FontFamily.Default
+                                        },
                                         fontWeight = FontWeight.Medium,
                                         color = Color.White.copy(alpha = 0.42f),
                                         textAlign = TextAlign.Center,
                                         maxLines = 2
                                     )
-                                    Spacer(Modifier.height(22.dp))
+                                    Spacer(Modifier.height(playbackLineSpacing.dp))
                                 }
                                 Text(
                                     lyrics[activeIndex].text,
                                     modifier = Modifier.fillMaxWidth(),
-                                    fontSize = 46.sp,
-                                    lineHeight = 55.sp,
+                                    fontSize = playbackFontSize.sp,
+                                    lineHeight = (playbackFontSize * 1.2f).sp,
+                                    fontFamily = when (playbackFontStyle) {
+                                        "Serif" -> FontFamily.Serif
+                                        "Monospace" -> FontFamily.Monospace
+                                        else -> FontFamily.Default
+                                    },
                                     fontWeight = FontWeight.Bold,
                                     color = lyricColor,
                                     textAlign = TextAlign.Center,
                                     maxLines = 3
                                 )
                                 if (activeIndex < lyrics.lastIndex) {
-                                    Spacer(Modifier.height(22.dp))
+                                    Spacer(Modifier.height(playbackLineSpacing.dp))
                                     Text(
                                         lyrics[activeIndex + 1].text,
                                         modifier = Modifier.fillMaxWidth(),
-                                        fontSize = 22.sp,
-                                        lineHeight = 29.sp,
+                                        fontSize = (playbackFontSize * 0.48f).sp,
+                                        lineHeight = (playbackFontSize * 0.63f).sp,
+                                        fontFamily = when (playbackFontStyle) {
+                                            "Serif" -> FontFamily.Serif
+                                            "Monospace" -> FontFamily.Monospace
+                                            else -> FontFamily.Default
+                                        },
                                         fontWeight = FontWeight.Medium,
                                         color = Color.White.copy(alpha = 0.65f),
                                         textAlign = TextAlign.Center,
@@ -792,23 +865,71 @@ class MainActivity : ComponentActivity() {
                                 Text("+5.0 s", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             HorizontalDivider()
-                            Text("VISUALIZER COLOUR", color = MaterialTheme.colorScheme.primary,
+                            Text("PLAYBACK APPEARANCE", color = MaterialTheme.colorScheme.primary,
                                 fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Multicolour audio mode", fontWeight = FontWeight.Medium)
-                                    Text("Stronger waves become brighter and more vivid",
-                                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Lyrics size: ${playbackFontSize.roundToInt()} sp", fontSize = 13.sp)
+                            Slider(value = playbackFontSize, onValueChange = {
+                                playbackFontSize = it
+                                settingsPrefs.edit().putFloat("playback_font_size", it).apply()
+                            }, valueRange = 30f..64f)
+                            Text("Line spacing: ${playbackLineSpacing.roundToInt()} dp", fontSize = 13.sp)
+                            Slider(value = playbackLineSpacing, onValueChange = {
+                                playbackLineSpacing = it
+                                settingsPrefs.edit().putFloat("playback_line_spacing", it).apply()
+                            }, valueRange = 8f..40f)
+                            Text("Vertical position: ${playbackVerticalPosition.roundToInt()} dp", fontSize = 13.sp)
+                            Slider(value = playbackVerticalPosition, onValueChange = {
+                                playbackVerticalPosition = it
+                                settingsPrefs.edit().putFloat("playback_vertical_position", it).apply()
+                            }, valueRange = -100f..100f)
+                            Text("Font style", fontSize = 13.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("Default", "Serif", "Monospace").forEach { style ->
+                                    FilterChip(selected = playbackFontStyle == style, onClick = {
+                                        playbackFontStyle = style
+                                        settingsPrefs.edit().putString("playback_font_style", style).apply()
+                                    }, label = { Text(style, fontSize = 11.sp) })
                                 }
-                                Switch(
-                                    checked = multicolorVisualizer,
-                                    onCheckedChange = {
-                                        multicolorVisualizer = it
-                                        settingsPrefs.edit().putBoolean("visualizer_multicolor", it).apply()
-                                    }
-                                )
                             }
-                            Text("When off, the visualizer matches the lyric text colour.",
+                            HorizontalDivider()
+                            Text("VISUALIZER CUSTOMIZATION", color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("Style", fontSize = 13.sp)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                listOf("Bars", "Waveform", "Mirrored Bars", "Circular").chunked(2).forEach { rowItems ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        rowItems.forEach { style ->
+                                            FilterChip(selected = visualizerStyle == style, onClick = {
+                                                visualizerStyle = style
+                                                settingsPrefs.edit().putString("visualizer_style", style).apply()
+                                            }, label = { Text(style, fontSize = 11.sp) })
+                                        }
+                                    }
+                                }
+                            }
+                            Text("Height: ${visualizerHeight.roundToInt()}%", fontSize = 13.sp)
+                            Slider(value = visualizerHeight, onValueChange = {
+                                visualizerHeight = it
+                                settingsPrefs.edit().putFloat("visualizer_height", it).apply()
+                            }, valueRange = 20f..80f)
+                            Text("Sensitivity: ${String.format(Locale.ROOT, "%.1f", visualizerSensitivity)}×", fontSize = 13.sp)
+                            Slider(value = visualizerSensitivity, onValueChange = {
+                                visualizerSensitivity = it
+                                settingsPrefs.edit().putFloat("visualizer_sensitivity", it).apply()
+                            }, valueRange = 0.5f..2f)
+                            Text("Colour mode", fontSize = 13.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("Single", "Spectrum", "Gradient").forEach { mode ->
+                                    FilterChip(selected = visualizerColorMode == mode, onClick = {
+                                        visualizerColorMode = mode
+                                        multicolorVisualizer = mode == "Spectrum"
+                                        settingsPrefs.edit()
+                                            .putString("visualizer_color_mode", mode)
+                                            .putBoolean("visualizer_multicolor", multicolorVisualizer).apply()
+                                    }, label = { Text(mode, fontSize = 11.sp) })
+                                }
+                            }
+                            Text("Single colour follows the selected lyrics colour. Spectrum reacts with changing intensity; Gradient uses a fixed colour spectrum.",
                                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             HorizontalDivider()
                             Text("LYRICS TEXT COLOUR", color = MaterialTheme.colorScheme.primary,
@@ -834,6 +955,27 @@ class MainActivity : ComponentActivity() {
                             }
                             Text("The selected colour is used for the active lyric and, in matching mode, the visualizer.",
                                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = {
+                                playbackFontSize = 46f
+                                playbackLineSpacing = 22f
+                                playbackVerticalPosition = 0f
+                                playbackFontStyle = "Default"
+                                visualizerStyle = "Bars"
+                                visualizerHeight = 46f
+                                visualizerSensitivity = 1f
+                                visualizerColorMode = "Single"
+                                multicolorVisualizer = false
+                                settingsPrefs.edit()
+                                    .putFloat("playback_font_size", 46f)
+                                    .putFloat("playback_line_spacing", 22f)
+                                    .putFloat("playback_vertical_position", 0f)
+                                    .putString("playback_font_style", "Default")
+                                    .putString("visualizer_style", "Bars")
+                                    .putFloat("visualizer_height", 46f)
+                                    .putFloat("visualizer_sensitivity", 1f)
+                                    .putString("visualizer_color_mode", "Single")
+                                    .putBoolean("visualizer_multicolor", false).apply()
+                            }) { Text("RESET APPEARANCE & VISUALIZER") }
                         }
                     },
                     confirmButton = { TextButton(onClick = { showSettings = false }) { Text("DONE") } }
