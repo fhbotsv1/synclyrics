@@ -36,7 +36,7 @@ class AudioCaptureService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val TAG = "SyncLyricsCapture"
         private const val ACTION_LEVEL = "com.littlebird.synclyrics.VISUALIZER_LEVEL"
-        private const val BAND_COUNT = 28
+        private const val BAND_COUNT = 48
     }
 
     @Volatile private var running = false
