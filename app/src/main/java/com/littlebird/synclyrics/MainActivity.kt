@@ -3,9 +3,12 @@ package com.littlebird.synclyrics
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
+import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
 import android.provider.Settings
+import android.provider.MediaStore
+import android.os.Environment
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
@@ -110,6 +113,23 @@ class MainActivity : ComponentActivity() {
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
+        var pendingPublicExport by remember { mutableStateOf<String?>(null) }
+
+        val publicExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-lrc")) { uri: Uri? ->
+            val content = pendingPublicExport
+            pendingPublicExport = null
+            if (uri != null && content != null) {
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
+                                ?: throw IllegalStateException("Could not write the LRC file.")
+                        }
+                    }.onSuccess { lyricsMessage = "Saved offline and exported to Files" }
+                        .onFailure { error = it.message ?: "Could not export LRC file." }
+                }
+            }
+        }
         var positionNow by remember { mutableLongStateOf(0L) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
         LaunchedEffect(accessRefresh) { hasAccess = hasNotificationAccess() }
@@ -246,14 +266,24 @@ class MainActivity : ComponentActivity() {
                                 enabled = !isSaved,
                                 onClick = {
                                     scope.launch {
+                                        val lrcText = serializeLrc(lyrics)
                                         runCatching {
                                             withContext(Dispatchers.IO) {
-                                                lyricsDb.save(player.title, player.artist, player.album, serializeLrc(lyrics))
+                                                lyricsDb.save(player.title, player.artist, player.album, lrcText)
+                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                                    exportLrcToDownloads(context, player.title, player.artist, lrcText)
+                                                }
                                             }
                                         }.onSuccess {
                                             isSaved = true
-                                            lyricsMessage = "Saved to offline library"
-                                        }.onFailure { error = it.message ?: "Could not save lyrics." }
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                                lyricsMessage = "Saved offline and exported to Downloads/SyncLyrics"
+                                            } else {
+                                                pendingPublicExport = lrcText
+                                                publicExportLauncher.launch(makeLrcFileName(player.title, player.artist))
+                                                lyricsMessage = "Saved offline — choose where to save the LRC file"
+                                            }
+                                        }.onFailure { error = it.message ?: "Could not save or export lyrics." }
                                     }
                                 }
                             ) { Text(if (isSaved) "✓ DOWNLOADED" else "↓ DOWNLOAD LYRICS") }
@@ -461,4 +491,35 @@ private fun serializeLrc(lines: List<LyricLine>): String = lines.joinToString("\
 private fun formatTime(ms: Long): String {
     val seconds = ms.coerceAtLeast(0) / 1000
     return String.format(Locale.getDefault(), "%d:%02d", seconds / 60, seconds % 60)
+}
+
+
+private fun makeLrcFileName(title: String, artist: String): String {
+    val raw = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" - ").ifBlank { "Lyrics" }
+    val safe = raw.replace(Regex("[\\\\/:*?\\"<>|]"), "_").trim().take(120)
+    return "$safe.lrc"
+}
+
+private fun exportLrcToDownloads(context: Context, title: String, artist: String, content: String) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        throw IllegalStateException("Public Downloads export requires Android 10 or newer.")
+    }
+    val values = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, makeLrcFileName(title, artist))
+        put(MediaStore.Downloads.MIME_TYPE, "application/x-lrc")
+        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SyncLyrics")
+        put(MediaStore.Downloads.IS_PENDING, 1)
+    }
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: throw IllegalStateException("Could not create the LRC file in Downloads.")
+    try {
+        resolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
+            ?: throw IllegalStateException("Could not write the LRC file.")
+        val completed = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+        resolver.update(uri, completed, null, null)
+    } catch (e: Exception) {
+        resolver.delete(uri, null, null)
+        throw e
+    }
 }
