@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
     private val visualizerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_VISUALIZER_LEVEL) {
-                onVisualizerBands?.invoke(intent.getFloatArrayExtra("bands") ?: FloatArray(28))
+                onVisualizerBands?.invoke(intent.getFloatArrayExtra("bands") ?: FloatArray(48))
             }
         }
     }
@@ -165,7 +165,7 @@ class MainActivity : ComponentActivity() {
         var playbackControlsVisible by remember { mutableStateOf(true) }
         var playbackControlsReset by remember { mutableIntStateOf(0) }
         var visualizerEnabled by remember { mutableStateOf(context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).getBoolean("visualizer_enabled", false)) }
-        var audioBands by remember { mutableStateOf(FloatArray(28)) }
+        var audioBands by remember { mutableStateOf(FloatArray(48)) }
         onVisualizerBands = { audioBands = it }
         val projectionManager = remember { context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager }
         val projectionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -387,9 +387,9 @@ class MainActivity : ComponentActivity() {
                         if (visualizerEnabled && Build.VERSION.SDK_INT >= 29) {
                             Canvas(Modifier.fillMaxSize()) {
                                 val bars = audioBands.size
-                                val gap = size.width * 0.012f
+                                val gap = size.width * 0.0065f
                                 val barWidth = (size.width - gap * (bars - 1)) / bars
-                                val baseline = size.height * 0.78f
+                                val baseline = size.height
                                 for (i in 0 until bars) {
                                     val level = audioBands[i].coerceIn(0f, 1f)
                                     val height = (size.height * 0.46f * level).coerceAtLeast(2f)
