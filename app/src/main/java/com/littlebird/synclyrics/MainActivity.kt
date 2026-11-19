@@ -278,8 +278,9 @@ class MainActivity : ComponentActivity() {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (playbackMode) {
                     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+                    val originalScreenBrightness = remember { window.attributes.screenBrightness }
                     var brightness by remember {
-                        mutableFloatStateOf((window.attributes.screenBrightness.takeIf { it >= 0f } ?: 0.5f).coerceIn(0.01f, 1f))
+                        mutableFloatStateOf((originalScreenBrightness.takeIf { it >= 0f } ?: 0.5f).coerceIn(0.01f, 1f))
                     }
                     Box(
                         Modifier.fillMaxSize().pointerInput(playbackMode) {
@@ -315,6 +316,9 @@ class MainActivity : ComponentActivity() {
                         Button(
                             onClick = {
                                 playbackMode = false
+                                val restoredAttributes = window.attributes
+                                restoredAttributes.screenBrightness = originalScreenBrightness
+                                window.attributes = restoredAttributes
                                 setPlaybackUi(false)
                                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                             },
