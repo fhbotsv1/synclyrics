@@ -385,8 +385,14 @@ class MainActivity : ComponentActivity() {
                         if (libraryItems.isEmpty()) {
                             Text("Your offline lyrics library is empty. Download lyrics while a song is playing.")
                         } else {
-                            Column(Modifier.heightIn(max = 420.dp)) {
-                                libraryItems.forEach { item ->
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
+                                contentPadding = PaddingValues(vertical = 4.dp)
+                            ) {
+                                itemsIndexed(
+                                    libraryItems,
+                                    key = { _, item -> item.fileUri ?: "${item.title}|${item.artist}" }
+                                ) { _, item ->
                                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(item.title, fontWeight = FontWeight.SemiBold)
