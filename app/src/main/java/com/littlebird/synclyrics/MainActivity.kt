@@ -106,6 +106,10 @@ class MainActivity : ComponentActivity() {
         var lyricsMessage by remember { mutableStateOf("Waiting for a song…") }
         var loading by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
+        val lyricsDb = remember { LyricsDatabase(context) }
+        var isSaved by remember { mutableStateOf(false) }
+        var showLibrary by remember { mutableStateOf(false) }
+        var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
         var positionNow by remember { mutableLongStateOf(0L) }
         var hasAccess by remember { mutableStateOf(hasNotificationAccess()) }
         LaunchedEffect(accessRefresh) { hasAccess = hasNotificationAccess() }
@@ -117,6 +121,7 @@ class MainActivity : ComponentActivity() {
             positionNow = next.position
             if (changedSong) {
                 lyrics = emptyList()
+                isSaved = false
                 lyricsMessage = if (next.title.isBlank()) "Waiting for a song…" else "Finding synced lyrics…"
             }
         }
@@ -132,7 +137,13 @@ class MainActivity : ComponentActivity() {
                 }.onSuccess { text ->
                     val parsed = parseLrc(text)
                     if (parsed.isEmpty()) error = "No timestamped lyric lines found in this LRC file."
-                    else { lyrics = parsed; lyricsMessage = "Lyrics loaded from file"; error = null }
+                    else {
+                        lyrics = parsed
+                        withContext(Dispatchers.IO) { lyricsDb.save(player.title.ifBlank { "Imported lyrics" }, player.artist, player.album, text) }
+                        isSaved = true
+                        lyricsMessage = "Imported and saved offline"
+                        error = null
+                    }
                 }.onFailure { error = it.message ?: "Could not open lyrics file." }
             }
         }
@@ -141,17 +152,25 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(songKey) {
             if (player.title.isNotBlank()) {
                 loading = true
-                lyricsMessage = "Looking up lyrics…"
-                val result = runCatching { fetchLyrics(player.title, player.artist, player.album) }
-                result.onSuccess { found ->
-                    lyrics = found
-                    lyricsMessage = if (found.isEmpty()) "No synced lyrics found. Import an LRC file." else "Synced lyrics"
-                }.onFailure {
-                    lyricsMessage = "Could not retrieve lyrics. Check your connection or import an LRC file."
+                val cached = withContext(Dispatchers.IO) { lyricsDb.find(player.title, player.artist) }
+                if (cached != null) {
+                    lyrics = parseLrc(cached.lrc)
+                    isSaved = lyrics.isNotEmpty()
+                    lyricsMessage = "Loaded from offline library"
+                } else {
+                    lyricsMessage = "Looking up lyrics online…"
+                    val result = runCatching { fetchLyrics(player.title, player.artist, player.album) }
+                    result.onSuccess { found ->
+                        lyrics = found
+                        lyricsMessage = if (found.isEmpty()) "No synced lyrics found. Import an LRC file." else "Synced lyrics — tap Download to save"
+                    }.onFailure {
+                        lyricsMessage = "Could not retrieve lyrics. Check your connection or import an LRC file."
+                    }
                 }
                 loading = false
             } else {
                 lyrics = emptyList()
+                isSaved = false
                 lyricsMessage = "Waiting for a song…"
             }
         }
@@ -181,6 +200,12 @@ class MainActivity : ComponentActivity() {
                             Text("SYNC", fontSize = 12.sp, letterSpacing = 4.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text("Lyrics", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                         }
+                        TextButton(onClick = {
+                            scope.launch {
+                                libraryItems = withContext(Dispatchers.IO) { lyricsDb.all() }
+                                showLibrary = true
+                            }
+                        }) { Text("LIBRARY") }
                         Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B)) {
                             Text(if (hasAccess) "● ACCESS ENABLED" else "● SETUP REQUIRED",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -215,6 +240,25 @@ class MainActivity : ComponentActivity() {
                         Text(lyricsMessage, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                     }
                     Spacer(Modifier.height(8.dp))
+                    if (lyrics.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(
+                                enabled = !isSaved,
+                                onClick = {
+                                    scope.launch {
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                lyricsDb.save(player.title, player.artist, player.album, serializeLrc(lyrics))
+                                            }
+                                        }.onSuccess {
+                                            isSaved = true
+                                            lyricsMessage = "Saved to offline library"
+                                        }.onFailure { error = it.message ?: "Could not save lyrics." }
+                                    }
+                                }
+                            ) { Text(if (isSaved) "✓ DOWNLOADED" else "↓ DOWNLOAD LYRICS") }
+                        }
+                    }
                     if (lyrics.isEmpty()) {
                         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -281,6 +325,46 @@ class MainActivity : ComponentActivity() {
                     Text("Playback is detected through Android media sessions. SyncLyrics does not record audio.",
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
+            }
+            if (showLibrary) {
+                AlertDialog(
+                    onDismissRequest = { showLibrary = false },
+                    title = { Text("Downloaded lyrics") },
+                    text = {
+                        if (libraryItems.isEmpty()) {
+                            Text("Your offline lyrics library is empty. Download lyrics while a song is playing.")
+                        } else {
+                            Column(Modifier.heightIn(max = 420.dp)) {
+                                libraryItems.forEach { item ->
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(item.title, fontWeight = FontWeight.SemiBold)
+                                            Text(item.artist.ifBlank { "Unknown artist" }, fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        TextButton(onClick = {
+                                            lyrics = parseLrc(item.lrc)
+                                            player = player.copy(title = item.title, artist = item.artist, album = item.album)
+                                            positionNow = 0L
+                                            isSaved = true
+                                            lyricsMessage = "Loaded from offline library"
+                                            showLibrary = false
+                                        }) { Text("LOAD") }
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { lyricsDb.delete(item.id) }
+                                                libraryItems = withContext(Dispatchers.IO) { lyricsDb.all() }
+                                                if (player.title == item.title && player.artist == item.artist) isSaved = false
+                                            }
+                                        }) { Text("DELETE", color = MaterialTheme.colorScheme.error) }
+                                    }
+                                    HorizontalDivider()
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showLibrary = false }) { Text("CLOSE") }
+                )
             }
         }
     }
@@ -364,6 +448,14 @@ private suspend fun fetchLyrics(title: String, artist: String, album: String): L
         Triple(score, index, synced)
     }.sortedByDescending { it.first }
     candidates.firstOrNull()?.third?.let { parseLrc(it) } ?: emptyList()
+}
+
+private fun serializeLrc(lines: List<LyricLine>): String = lines.joinToString("\n") { line ->
+    val totalCentiseconds = line.timeMs.coerceAtLeast(0L) / 10L
+    val minutes = totalCentiseconds / 6000
+    val seconds = (totalCentiseconds / 100) % 60
+    val centiseconds = totalCentiseconds % 100
+    "[%02d:%02d.%02d]%s".format(Locale.ROOT, minutes, seconds, centiseconds, line.text)
 }
 
 private fun formatTime(ms: Long): String {
