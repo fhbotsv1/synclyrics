@@ -1,6 +1,7 @@
 package com.littlebird.synclyrics
 
 import android.content.BroadcastReceiver
+import android.content.pm.ActivityInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -66,6 +67,26 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var onPlayerUpdate: ((PlayerInfo) -> Unit)? = null
+    private var playbackUiEnabled = false
+
+    private fun setPlaybackUi(enabled: Boolean) {
+        playbackUiEnabled = enabled
+        window.decorView.systemUiVisibility = if (enabled) {
+            (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+        } else {
+            android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && playbackUiEnabled) setPlaybackUi(true)
+    }
     private var accessRefresh by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,6 +132,7 @@ class MainActivity : ComponentActivity() {
         val migrationPrefs = remember { context.getSharedPreferences("synclyrics_migration", Context.MODE_PRIVATE) }
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
+        var playbackMode by remember { mutableStateOf(false) }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
@@ -249,6 +271,69 @@ class MainActivity : ComponentActivity() {
             surface = Color(0xFF191D18), surfaceVariant = Color(0xFF252B23)
         )) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                if (playbackMode) {
+                    Box(
+                        Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 12.dp)
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        player.title,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        color = Color(0xFFB8F36B)
+                                    )
+                                    Text(
+                                        player.artist,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        color = Color.White.copy(alpha = 0.55f)
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    playbackMode = false
+                                    setPlaybackUi(false)
+                                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                }) {
+                                    Text("⏻", fontSize = 25.sp, color = Color.White)
+                                }
+                            }
+                            if (lyrics.isNotEmpty()) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 18.dp, horizontal = 24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                                ) {
+                                    itemsIndexed(lyrics) { index, line ->
+                                        Text(
+                                            line.text,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            fontSize = if (index == activeIndex) 38.sp else 27.sp,
+                                            lineHeight = if (index == activeIndex) 46.sp else 34.sp,
+                                            fontWeight = if (index == activeIndex) FontWeight.Bold else FontWeight.Medium,
+                                            color = when {
+                                                index == activeIndex -> Color(0xFFB8F36B)
+                                                index < activeIndex -> Color.White.copy(alpha = 0.32f)
+                                                else -> Color.White.copy(alpha = 0.72f)
+                                            },
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
+                                }
+                            }
+                        }
+                    }
+                } else {
                 Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Column {
@@ -378,16 +463,21 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("Open LRC") }
-                        OutlinedButton(onClick = {
-                            hasAccess = hasNotificationAccess()
-                            context.sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(context.packageName))
-                            if (player.title.isNotBlank()) lyricsReload++
-                        }, modifier = Modifier.weight(1f)) { Text("Refresh player") }
+                    Button(
+                        onClick = {
+                            playbackMode = true
+                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            setPlaybackUi(true)
+                        },
+                        enabled = lyrics.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Text("▶  PLAYBACK", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                     }
                     Text("Playback is detected through Android media sessions. SyncLyrics does not record audio.",
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
                 }
             }
             if (showLibrary) {
