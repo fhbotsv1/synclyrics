@@ -17,6 +17,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,6 +43,7 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val ACTION_MEDIA_UPDATE = "com.littlebird.synclyrics.MEDIA_UPDATE"
 
@@ -138,6 +140,8 @@ class MainActivity : ComponentActivity() {
         var playbackMode by remember { mutableStateOf(false) }
         var gestureSide by remember { mutableStateOf("") }
         var gestureValue by remember { mutableFloatStateOf(0f) }
+        var playbackControlsVisible by remember { mutableStateOf(true) }
+        var playbackControlsReset by remember { mutableIntStateOf(0) }
         var libraryItems by remember { mutableStateOf(emptyList<SavedLyrics>()) }
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
@@ -265,6 +269,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        LaunchedEffect(playbackMode, playbackControlsVisible, playbackControlsReset) {
+            if (playbackMode && playbackControlsVisible) {
+                delay(3500)
+                playbackControlsVisible = false
+            }
+        }
+
         val activeIndex = lyrics.indexOfLast { it.timeMs <= positionNow }.coerceAtLeast(0)
         LaunchedEffect(activeIndex, lyrics.size) {
             if (lyrics.isNotEmpty()) listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
@@ -282,13 +293,24 @@ class MainActivity : ComponentActivity() {
                     var brightness by remember {
                         mutableFloatStateOf((originalScreenBrightness.takeIf { it >= 0f } ?: 0.5f).coerceIn(0.01f, 1f))
                     }
+                    var volumeLevel by remember {
+                        mutableFloatStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat())
+                    }
                     Box(
-                        Modifier.fillMaxSize().pointerInput(playbackMode) {
+                        Modifier.fillMaxSize()
+                            .pointerInput(playbackMode) {
+                                detectTapGestures {
+                                    playbackControlsVisible = true
+                                    playbackControlsReset++
+                                }
+                            }
+                            .pointerInput(playbackMode) {
                             detectVerticalDragGestures(
                                 onDragStart = { offset ->
                                     gestureSide = if (offset.x < size.width / 2f) "BRIGHTNESS" else "VOLUME"
+                                    volumeLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
                                     gestureValue = if (gestureSide == "BRIGHTNESS") brightness
-                                        else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() /
+                                        else volumeLevel /
                                             audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                                 },
                                 onVerticalDrag = { change, dragAmount ->
@@ -302,10 +324,12 @@ class MainActivity : ComponentActivity() {
                                         gestureValue = brightness
                                     } else if (gestureSide == "VOLUME") {
                                         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                                        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                                        val nextVolume = (currentVolume + (adjustment * maxVolume).toInt()).coerceIn(0, maxVolume)
-                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, nextVolume, 0)
-                                        gestureValue = nextVolume.toFloat() / maxVolume
+                                        volumeLevel = (volumeLevel + adjustment * maxVolume).coerceIn(0f, maxVolume.toFloat())
+                                        val nextVolume = volumeLevel.roundToInt().coerceIn(0, maxVolume)
+                                        if (nextVolume != audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)) {
+                                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, nextVolume, 0)
+                                        }
+                                        gestureValue = volumeLevel / maxVolume
                                     }
                                 },
                                 onDragEnd = { gestureSide = "" },
@@ -313,6 +337,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     ) {
+                        if (playbackControlsVisible) {
                         Button(
                             onClick = {
                                 playbackMode = false
@@ -403,6 +428,7 @@ class MainActivity : ComponentActivity() {
                             }) { Text("⏭", fontSize = 30.sp, color = Color.White) }
                         }
 
+                        }
                         if (gestureSide.isNotBlank()) {
                             Surface(
                                 modifier = Modifier.align(
