@@ -74,7 +74,7 @@ class PublicLyricsLibrary(private val context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val relativePath = Environment.DIRECTORY_DOWNLOADS + "/SyncLyrics/"
             val existing = all().firstOrNull { it.title.equals(title, true) && it.artist.equals(artist, true) }
-            if (existing != null) resolver.delete(Uri.parse(existing.lrcFileUri()), null, null)
+            if (existing != null) existing.fileUri?.let { resolver.delete(Uri.parse(it), null, null) }
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                 put(MediaStore.Downloads.MIME_TYPE, "application/x-lrc")
