@@ -255,10 +255,11 @@ class MainActivity : ComponentActivity() {
                                 }
                             }) { Text("LIBRARY") }
                         }
-                        Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B)) {
-                            Text(if (hasAccess) "● ACCESS ENABLED" else "● SETUP REQUIRED",
+                        Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B))
+                        {
+                           /* Text(if (hasAccess) "● ACCESS OK" else "● SETUP",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                color = if (hasAccess) Color(0xFFB8F36B) else Color(0xFFFFC078), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                color = if (hasAccess) Color(0xFFB8F36B) else Color(0xFFFFC078), fontSize = 10.sp, fontWeight = FontWeight.Bold) */
                         }
                     }
                     Spacer(Modifier.height(20.dp))
