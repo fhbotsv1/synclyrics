@@ -747,7 +747,7 @@ class MainActivity : ComponentActivity() {
                                         enabled = !loading
                                     ) { Text(if (loading) "Searching…" else "Search Lyrics") }
                                 }
-                                OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "application/octet-stream")) }) { Text("Import .LRC file") }
+                                OutlinedButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) { Text("Import .LRC file") }
                                 if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                             }
                         }
