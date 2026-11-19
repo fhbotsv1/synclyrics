@@ -123,8 +123,13 @@ class MediaSessionListener : NotificationListenerService() {
     }
 
     private fun broadcastBestControllerState(controllers: List<MediaController>) {
+        // Prefer the actively playing session. If playback is paused, prefer a
+        // controller that still has a real track title over stale/empty sessions.
         val best = controllers.firstOrNull {
-            it.playbackState?.state == PlaybackState.STATE_PLAYING
+            it.playbackState?.state == PlaybackState.STATE_PLAYING &&
+                !it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
+        } ?: controllers.firstOrNull {
+            !it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
         } ?: controllers.firstOrNull()
 
         if (best != null) {
