@@ -129,7 +129,7 @@ class AudioCaptureService : Service() {
             val smoothed = FloatArray(BAND_COUNT)
             val frequencies = FloatArray(BAND_COUNT) { index ->
                 val fraction = index.toFloat() / (BAND_COUNT - 1)
-                (70.0 * (7000.0 / 70.0).pow(fraction)).toFloat()
+                (70.0 * (7000.0 / 70.0).pow(fraction.toDouble())).toFloat()
             }
             val coefficients = FloatArray(BAND_COUNT) { index ->
                 (2.0 * cos(2.0 * PI * frequencies[index] / sampleRate)).toFloat()
