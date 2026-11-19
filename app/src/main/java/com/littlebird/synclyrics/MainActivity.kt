@@ -245,7 +245,9 @@ class MainActivity : ComponentActivity() {
             // produce an empty session update. Do not let that transient update erase
             // the current song or its lyrics.
             if (next.title.isBlank() && player.title.isNotBlank()) {
-                player = player.copy(playing = false)
+                // Ignore transient empty media-session updates (for example when
+                // returning from screen sharing or another system activity).
+                // Keeping the last known playing state lets the lyric clock continue.
                 return
             }
 
