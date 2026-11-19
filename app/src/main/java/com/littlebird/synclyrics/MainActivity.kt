@@ -83,12 +83,17 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         accessRefresh++
+        sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(packageName))
     }
 
     override fun onStop() {
-        onPlayerUpdate = null
         runCatching { unregisterReceiver(mediaReceiver) }
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        onPlayerUpdate = null
+        super.onDestroy()
     }
 
     @Composable
