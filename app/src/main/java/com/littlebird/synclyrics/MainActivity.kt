@@ -181,7 +181,7 @@ class MainActivity : ComponentActivity() {
                             Text("Lyrics", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                         }
                         Surface(shape = CircleShape, color = if (hasAccess) Color(0xFF24351C) else Color(0xFF38291B)) {
-                            Text(if (hasAccess) "● CONNECTED" else "● SETUP REQUIRED",
+                            Text(if (hasAccess) "● ACCESS ENABLED" else "● SETUP REQUIRED",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 color = if (hasAccess) Color(0xFFB8F36B) else Color(0xFFFFC078), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
@@ -253,7 +253,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/*", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("Open LRC") }
-                        OutlinedButton(onClick = { hasAccess = hasNotificationAccess() }, modifier = Modifier.weight(1f)) { Text("Refresh status") }
+                        OutlinedButton(onClick = { hasAccess = hasNotificationAccess(); context.sendBroadcast(Intent("com.littlebird.synclyrics.REFRESH_SESSIONS").setPackage(context.packageName)) }, modifier = Modifier.weight(1f)) { Text("Refresh player") }
                     }
                     Text("Playback is detected through Android media sessions. SyncLyrics does not record audio.",
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
