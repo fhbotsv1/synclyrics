@@ -81,11 +81,11 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var onPlayerUpdate: ((PlayerInfo) -> Unit)? = null
-    private var onVisualizerLevel: ((Float) -> Unit)? = null
+    private var onVisualizerBands: ((FloatArray) -> Unit)? = null
     private val visualizerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_VISUALIZER_LEVEL) {
-                onVisualizerLevel?.invoke(intent.getFloatExtra("level", 0f).coerceIn(0f, 1f))
+                onVisualizerBands?.invoke(intent.getFloatArrayExtra("bands") ?: FloatArray(28))
             }
         }
     }
@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         onPlayerUpdate = null
-        onVisualizerLevel = null
+        onVisualizerBands = null
         super.onDestroy()
     }
 
@@ -165,8 +165,8 @@ class MainActivity : ComponentActivity() {
         var playbackControlsVisible by remember { mutableStateOf(true) }
         var playbackControlsReset by remember { mutableIntStateOf(0) }
         var visualizerEnabled by remember { mutableStateOf(context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE).getBoolean("visualizer_enabled", false)) }
-        var audioLevel by remember { mutableFloatStateOf(0f) }
-        onVisualizerLevel = { audioLevel = it }
+        var audioBands by remember { mutableStateOf(FloatArray(28)) }
+        onVisualizerBands = { audioBands = it }
         val projectionManager = remember { context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager }
         val projectionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
@@ -386,17 +386,17 @@ class MainActivity : ComponentActivity() {
                     ) {
                         if (visualizerEnabled && Build.VERSION.SDK_INT >= 29) {
                             Canvas(Modifier.fillMaxSize()) {
-                                val bars = 44
-                                val gap = size.width * 0.009f
+                                val bars = audioBands.size
+                                val gap = size.width * 0.012f
                                 val barWidth = (size.width - gap * (bars - 1)) / bars
-                                val centerY = size.height * 0.72f
+                                val baseline = size.height * 0.78f
                                 for (i in 0 until bars) {
-                                    val envelope = (0.22f + 0.78f * kotlin.math.abs(kotlin.math.sin(i * 0.31f + audioLevel * 8f)))
-                                    val height = (size.height * 0.42f * audioLevel * envelope).coerceAtLeast(2f)
+                                    val level = audioBands[i].coerceIn(0f, 1f)
+                                    val height = (size.height * 0.46f * level).coerceAtLeast(2f)
                                     val x = i * (barWidth + gap)
                                     drawRoundRect(
-                                        color = Color(0xFFB8F36B).copy(alpha = (0.10f + audioLevel * 0.18f).coerceAtMost(0.28f)),
-                                        topLeft = Offset(x, centerY - height / 2f),
+                                        color = Color(0xFFB8F36B).copy(alpha = (0.08f + level * 0.30f).coerceAtMost(0.38f)),
+                                        topLeft = Offset(x, baseline - height),
                                         size = Size(barWidth, height),
                                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
                                     )
