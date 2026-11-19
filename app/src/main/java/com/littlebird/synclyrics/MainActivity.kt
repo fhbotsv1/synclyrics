@@ -459,19 +459,25 @@ class MainActivity : ComponentActivity() {
                                             val barHeight = (maxBarHeight * level).coerceAtLeast(2f)
                                             val x = i * (barWidth + gap)
                                             val mirrored = visualizerStyle == "Mirrored Bars"
-                                            val top = if (mirrored) centerY - barHeight / 2f else size.height - barHeight
-                                            val height = if (mirrored) barHeight else barHeight
-                                            drawRoundRect(
-                                                color = bandColor(i, level),
-                                                topLeft = Offset(x, top),
-                                                size = Size(barWidth, height),
-                                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
-                                            )
                                             if (mirrored) {
+                                                val halfHeight = (barHeight * 0.5f).coerceAtMost(size.height * 0.38f)
+                                                drawRoundRect(
+                                                    color = bandColor(i, level),
+                                                    topLeft = Offset(x, centerY - halfHeight),
+                                                    size = Size(barWidth, halfHeight),
+                                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                                )
                                                 drawRoundRect(
                                                     color = bandColor(i, level),
                                                     topLeft = Offset(x, centerY),
-                                                    size = Size(barWidth, barHeight / 2f),
+                                                    size = Size(barWidth, halfHeight),
+                                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                                                )
+                                            } else {
+                                                drawRoundRect(
+                                                    color = bandColor(i, level),
+                                                    topLeft = Offset(x, size.height - barHeight),
+                                                    size = Size(barWidth, barHeight),
                                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
                                                 )
                                             }
