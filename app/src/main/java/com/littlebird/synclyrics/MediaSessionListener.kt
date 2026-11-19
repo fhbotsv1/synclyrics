@@ -2,6 +2,10 @@ package com.littlebird.synclyrics
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.os.Build
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
@@ -14,18 +18,24 @@ class MediaSessionListener : NotificationListenerService() {
     private var selected: MediaController? = null
     private lateinit var sessionManager: android.media.session.MediaSessionManager
 
+    private val refreshReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) { refreshSessions() }
+    }
     private val sessionsChanged = android.media.session.MediaSessionManager.OnActiveSessionsChangedListener {
         refreshSessions()
     }
     private val callback = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) { publish(selected) }
-        override fun onPlaybackStateChanged(state: PlaybackState?) { publish(selected) }
-        override fun onSessionDestroyed() { refreshSessions() }
+        override fun onMetadataChanged(controller: MediaController, metadata: MediaMetadata?) { publishIfSelected(controller) }
+        override fun onPlaybackStateChanged(controller: MediaController, state: PlaybackState?) { publishIfSelected(controller) }
+        override fun onSessionDestroyed(controller: MediaController) { refreshSessions() }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         sessionManager = getSystemService(android.media.session.MediaSessionManager::class.java)
+        val refreshFilter = IntentFilter("com.littlebird.synclyrics.REFRESH_SESSIONS")
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(refreshReceiver, refreshFilter, Context.RECEIVER_NOT_EXPORTED)
+        else { @Suppress("DEPRECATION") registerReceiver(refreshReceiver, refreshFilter) }
         runCatching {
             sessionManager.addOnActiveSessionsChangedListener(
                 sessionsChanged, ComponentName(this, MediaSessionListener::class.java)
@@ -56,6 +66,10 @@ class MediaSessionListener : NotificationListenerService() {
         publish(selected)
     }
 
+    private fun publishIfSelected(controller: MediaController) {
+        if (selected?.sessionToken == controller.sessionToken) publish(controller)
+    }
+
     private fun publish(controller: MediaController?) {
         val metadata = controller?.metadata
         val state = controller?.playbackState
@@ -75,6 +89,7 @@ class MediaSessionListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(refreshReceiver) }
         if (::sessionManager.isInitialized) runCatching {
             sessionManager.removeOnActiveSessionsChangedListener(sessionsChanged)
         }
