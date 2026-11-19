@@ -363,7 +363,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
-                    confirmButton = { TextButton(onClick = { showLibrary = false }) { Text("CLOSE") }
+                    confirmButton = { TextButton(onClick = { showLibrary = false }) { Text("CLOSE") } }
                 )
             }
         }
