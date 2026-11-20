@@ -65,6 +65,7 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private data class LocalMediaItem(
     val uri: Uri, val title: String, val artist: String,
@@ -123,6 +124,7 @@ fun LocalMediaPlayerScreen(
     }
 
     val activity = context as? Activity
+    val originalWindowBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
     DisposableEffect(fullscreenPlayback) {
         val window = activity?.window
         val decor = window?.decorView
@@ -141,6 +143,11 @@ fun LocalMediaPlayerScreen(
             if (fullscreenPlayback) {
                 activity?.requestedOrientation = oldOrientation
                 decor?.systemUiVisibility = oldUiVisibility
+                activity?.window?.let { window ->
+                    val attributes = window.attributes
+                    attributes.screenBrightness = originalWindowBrightness
+                    window.attributes = attributes
+                }
             }
         }
     }
@@ -280,7 +287,11 @@ fun LocalMediaPlayerScreen(
                             if (gestureSide == "BRIGHTNESS") {
                                 val current = activityWindow?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f
                                 val next = (current - dragAmount.y / size.height * 1.2f).coerceIn(0.01f, 1f)
-                                activityWindow?.attributes = activityWindow.attributes.apply { screenBrightness = next }
+                                activityWindow?.let { window ->
+                                    val attributes = window.attributes
+                                    attributes.screenBrightness = next
+                                    window.attributes = attributes
+                                }
                                 gestureValue = next
                             } else {
                                 val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
@@ -295,7 +306,6 @@ fun LocalMediaPlayerScreen(
                     )
                 }
         ) {
-            val density = androidx.compose.ui.platform.LocalDensity.current
             val currentTrack = selected
             val lyricIndex = lyrics.indexOfLast { it.timeMs <= (position - syncOffsetMs).coerceAtLeast(0L) }.coerceAtLeast(0)
             Column(
@@ -331,8 +341,8 @@ fun LocalMediaPlayerScreen(
                         .pointerInput(fullscreenPlayback) {
                             detectDragGestures { change, drag ->
                                 change.consume()
-                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (constraints.maxWidth - size.width).coerceAtLeast(0))
-                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (constraints.maxHeight - size.height).coerceAtLeast(0))
+                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (constraints.maxWidth.roundToPx() - size.width).coerceAtLeast(0))
+                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (constraints.maxHeight.roundToPx() - size.height).coerceAtLeast(0))
                             }
                         }
                 ) {
