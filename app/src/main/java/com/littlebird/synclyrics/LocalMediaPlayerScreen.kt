@@ -306,6 +306,9 @@ fun LocalMediaPlayerScreen(
                     )
                 }
         ) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val containerWidthPx = with(density) { maxWidth.roundToPx() }
+            val containerHeightPx = with(density) { maxHeight.roundToPx() }
             val currentTrack = selected
             val lyricIndex = lyrics.indexOfLast { it.timeMs <= (position - syncOffsetMs).coerceAtLeast(0L) }.coerceAtLeast(0)
             Column(
@@ -341,8 +344,8 @@ fun LocalMediaPlayerScreen(
                         .pointerInput(fullscreenPlayback) {
                             detectDragGestures { change, drag ->
                                 change.consume()
-                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (maxWidth.roundToPx() - size.width).coerceAtLeast(0))
-                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (maxHeight.roundToPx() - size.height).coerceAtLeast(0))
+                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (containerWidthPx - size.width).coerceAtLeast(0))
+                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (containerHeightPx - size.height).coerceAtLeast(0))
                             }
                         }
                 ) {
