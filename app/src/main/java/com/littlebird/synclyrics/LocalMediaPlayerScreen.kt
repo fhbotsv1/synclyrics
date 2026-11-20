@@ -77,6 +77,7 @@ fun LocalMediaPlayerScreen(
     var lyrics by remember { mutableStateOf(emptyList<LyricLine>()) }
     var lyricsMessage by remember { mutableStateOf("Choose a song to find its lyrics") }
     var lyricsLoading by remember { mutableStateOf(false) }
+    var lyricsSaved by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -102,8 +103,8 @@ fun LocalMediaPlayerScreen(
                 val track = selected
                 if (track != null) {
                     runCatching { withContext(Dispatchers.IO) { library.write(track.title, track.artist, "", text) } }
-                        .onSuccess { lyricsMessage = "Imported and saved to offline library" }
-                        .onFailure { lyricsMessage = "Imported for this session; choose Downloads/SyncLyrics using Scan & Sync to save it" }
+                        .onSuccess { lyricsSaved = true; lyricsMessage = "Imported and saved to offline library" }
+                        .onFailure { lyricsSaved = false; lyricsMessage = "Imported for this session; choose Downloads/SyncLyrics using Scan & Sync to save it" }
                 } else lyricsMessage = "LRC imported"
                 importError = null
             }.onFailure { importError = it.message ?: "Could not import LRC file." }
@@ -181,11 +182,13 @@ fun LocalMediaPlayerScreen(
             return@LaunchedEffect
         }
         lyrics = emptyList()
+        lyricsSaved = false
         lyricsLoading = true
         lyricsMessage = "Checking offline lyrics…"
         val cached = withContext(Dispatchers.IO) { library.find(track.title, track.artist) }
         if (cached != null) {
             lyrics = parseLocalLrc(cached.lrc)
+            lyricsSaved = lyrics.isNotEmpty()
             lyricsMessage = "Loaded from offline library"
         } else {
             lyricsMessage = "Searching LRCLIB…"
@@ -350,6 +353,25 @@ fun LocalMediaPlayerScreen(
                 Text("LYRICS", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                 Spacer(Modifier.weight(1f))
                 Text(lyricsMessage, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+            if (lyrics.isNotEmpty() && !lyricsSaved) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) {
+                                library.write(track.title, track.artist, "", lyrics.joinToString("\n") { line ->
+                                    val cs = line.timeMs.coerceAtLeast(0L) / 10L
+                                    "[%02d:%02d.%02d]%s".format(Locale.ROOT, cs / 6000, (cs / 100) % 60, cs % 100, line.text)
+                                })
+                            } }.onSuccess {
+                                lyricsSaved = true
+                                lyricsMessage = "Saved to offline library"
+                            }.onFailure {
+                                lyricsMessage = "Choose Downloads/SyncLyrics using Scan & Sync before saving"
+                            }
+                        }
+                    }) { Text("↓ SAVE LYRICS OFFLINE") }
+                }
             }
             if (lyrics.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
