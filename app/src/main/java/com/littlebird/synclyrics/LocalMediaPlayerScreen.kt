@@ -124,9 +124,9 @@ fun LocalMediaPlayerScreen(
                     MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.DISPLAY_NAME,
                     MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.RELATIVE_PATH
                 )
-                val selection = if (video) null else "\${MediaStore.Audio.Media.IS_MUSIC} != 0"
-                val sort = if (video) "\${MediaStore.Video.Media.DISPLAY_NAME} COLLATE NOCASE ASC"
-                    else "\${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+                val selection = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
+                val sort = if (video) MediaStore.Video.Media.DISPLAY_NAME + " COLLATE NOCASE ASC"
+                    else MediaStore.Audio.Media.TITLE + " COLLATE NOCASE ASC"
                 context.contentResolver.query(collection, projection, selection, null, sort)?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                     val titleCol = cursor.getColumnIndexOrThrow(if (video) MediaStore.Video.Media.TITLE else MediaStore.Audio.Media.TITLE)
