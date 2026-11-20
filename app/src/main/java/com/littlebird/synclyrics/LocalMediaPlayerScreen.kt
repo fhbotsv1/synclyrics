@@ -51,9 +51,9 @@ private data class LocalMediaItem(
     val duration: Long, val folder: String, val isVideo: Boolean
 )
 
-private fun requiredMediaPermissions(): Array<String> =
+private fun requiredMediaPermissions(tab: String): Array<String> =
     if (android.os.Build.VERSION.SDK_INT >= 33) arrayOf(
-        Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.READ_MEDIA_VIDEO
+        if (tab == "Videos") Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_MEDIA_AUDIO
     ) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 
 @Composable
@@ -104,7 +104,7 @@ fun LocalMediaPlayerScreen(
     }
 
     fun scan() {
-        val permitted = requiredMediaPermissions().all {
+        val permitted = requiredMediaPermissions(tab).all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
         if (!permitted) { onRequestMediaPermissions(); return }
@@ -195,7 +195,7 @@ fun LocalMediaPlayerScreen(
         search.isBlank() || it.title.contains(search, true) ||
             it.artist.contains(search, true) || it.folder.contains(search, true)
     }
-    val hasPermission = requiredMediaPermissions().all {
+    val hasPermission = requiredMediaPermissions(tab).all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
