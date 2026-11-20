@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -81,6 +82,9 @@ fun LocalMediaPlayerScreen(
     val exo = remember { ExoPlayer.Builder(context).build() }
 
     DisposableEffect(exo) { onDispose { exo.release() } }
+    BackHandler {
+        if (selected != null) { exo.stop(); selected = null } else onBack()
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -115,14 +119,16 @@ fun LocalMediaPlayerScreen(
                 val video = tab == "Videos"
                 val collection = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                     else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                val folderColumn = if (android.os.Build.VERSION.SDK_INT >= 29)
+                    MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
                 val projection = if (video) arrayOf(
                     MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE,
                     MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.DURATION,
-                    MediaStore.Video.Media.RELATIVE_PATH
+                    folderColumn
                 ) else arrayOf(
                     MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.DISPLAY_NAME,
-                    MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.RELATIVE_PATH
+                    MediaStore.Audio.Media.DURATION, folderColumn
                 )
                 val selection = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
                 val sort = if (video) MediaStore.Video.Media.DISPLAY_NAME + " COLLATE NOCASE ASC"
@@ -141,7 +147,10 @@ fun LocalMediaPlayerScreen(
                             Uri.withAppendedPath(collection, cursor.getLong(idCol).toString()),
                             title,
                             if (video) "" else cursor.getString(artistCol).orEmpty().takeUnless { it == "<unknown>" }.orEmpty(),
-                            cursor.getLong(durationCol), cursor.getString(folderCol).orEmpty(), video
+                            cursor.getLong(durationCol),
+                            cursor.getString(folderCol).orEmpty().let {
+                                if (android.os.Build.VERSION.SDK_INT < 29) it.substringBeforeLast('/', "") else it
+                            }, video
                         )
                     }
                 }
