@@ -127,6 +127,7 @@ fun LocalMediaPlayerScreen(
     var crossfadeSeconds by remember { mutableIntStateOf(playerPrefs.getInt("crossfade_seconds", 5)) }
     var showCrossfadeSettings by remember { mutableStateOf(false) }
     var crossfading by remember { mutableStateOf(false) }
+    val currentCrossfadeSeconds by rememberUpdatedState(crossfadeSeconds)
 
     DisposableEffect(Unit) {
         onDispose { exo.release(); standbyExo.release() }
@@ -135,7 +136,7 @@ fun LocalMediaPlayerScreen(
         val currentTrack = selected
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == androidx.media3.common.Player.STATE_ENDED && currentTrack != null) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED && currentTrack != null && !crossfading) {
                     val currentIndex = items.indexOfFirst { it.uri == currentTrack.uri }
                     val nextTrack = items.getOrNull(currentIndex + 1) ?: return
                     standbyExo.stop()
@@ -155,12 +156,13 @@ fun LocalMediaPlayerScreen(
         onDispose { exo.removeListener(listener) }
     }
 
-    LaunchedEffect(exo, selected?.uri, crossfadeSeconds, items) {
+    LaunchedEffect(exo, selected?.uri, items) {
         while (true) {
             val track = selected
             val active = exo
-            val fadeMs = crossfadeSeconds * 1000L
-            if (crossfadeSeconds > 0 && track != null && !track.isVideo &&
+            val fadeSeconds = currentCrossfadeSeconds
+            val fadeMs = fadeSeconds * 1000L
+            if (fadeSeconds > 0 && track != null && !track.isVideo &&
                 active.isPlaying && !crossfading && active.duration > fadeMs + 1000L) {
                 val remaining = active.duration - active.currentPosition
                 val index = items.indexOfFirst { it.uri == track.uri }
@@ -174,24 +176,36 @@ fun LocalMediaPlayerScreen(
                     incoming.setMediaItem(MediaItem.fromUri(nextTrack.uri))
                     incoming.prepare()
                     incoming.playWhenReady = true
-                    val steps = 40
-                    repeat(steps) { step ->
-                        val progress = (step + 1).toFloat() / steps
-                        active.volume = 1f - progress
-                        incoming.volume = progress
-                        delay((fadeMs / steps).coerceAtLeast(20L))
+                    var waitMs = 0
+                    while (incoming.playbackState != androidx.media3.common.Player.STATE_READY &&
+                        incoming.playbackState != androidx.media3.common.Player.STATE_ENDED && waitMs < 5000) {
+                        delay(50)
+                        waitMs += 50
                     }
-                    active.pause()
-                    active.stop()
-                    active.clearMediaItems()
-                    active.volume = 1f
-                    exo = incoming
-                    standbyExo = active
-                    selected = nextTrack
-                    videoVisible = false
-                    position = 0L
-                    duration = incoming.duration.takeIf { it > 0L } ?: nextTrack.duration
-                    incoming.volume = 1f
+                    if (incoming.playbackState == androidx.media3.common.Player.STATE_READY) {
+                        val steps = 40
+                        repeat(steps) { step ->
+                            val progress = (step + 1).toFloat() / steps
+                            active.volume = 1f - progress
+                            incoming.volume = progress
+                            delay((fadeMs / steps).coerceAtLeast(20L))
+                        }
+                        active.pause()
+                        active.stop()
+                        active.clearMediaItems()
+                        active.volume = 1f
+                        exo = incoming
+                        standbyExo = active
+                        selected = nextTrack
+                        videoVisible = false
+                        position = 0L
+                        duration = incoming.duration.takeIf { it > 0L } ?: nextTrack.duration
+                        incoming.volume = 1f
+                    } else {
+                        incoming.stop()
+                        incoming.clearMediaItems()
+                        incoming.volume = 1f
+                    }
                     crossfading = false
                 }
             }
