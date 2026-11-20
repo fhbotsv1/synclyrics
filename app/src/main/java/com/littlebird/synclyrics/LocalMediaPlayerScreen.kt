@@ -341,8 +341,8 @@ fun LocalMediaPlayerScreen(
                         .pointerInput(fullscreenPlayback) {
                             detectDragGestures { change, drag ->
                                 change.consume()
-                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (constraints.maxWidth.roundToPx() - size.width).coerceAtLeast(0))
-                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (constraints.maxHeight.roundToPx() - size.height).coerceAtLeast(0))
+                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (maxWidth.roundToPx() - size.width).coerceAtLeast(0))
+                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (maxHeight.roundToPx() - size.height).coerceAtLeast(0))
                             }
                         }
                 ) {
