@@ -1,6 +1,13 @@
 package com.littlebird.synclyrics
 
 import android.net.Uri
+import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.view.View
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.gestures.detectTapGestures
 import android.content.Intent
 import androidx.documentfile.provider.DocumentFile
 import android.media.MediaMetadataRetriever
@@ -93,12 +100,56 @@ fun LocalMediaPlayerScreen(
     var duration by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
     var seeking by remember { mutableStateOf(false) }
+    var fullscreenPlayback by remember { mutableStateOf(false) }
+    var playbackControlsVisible by remember { mutableStateOf(true) }
+    var playbackControlsReset by remember { mutableIntStateOf(0) }
+    var gestureSide by remember { mutableStateOf("") }
+    var gestureValue by remember { mutableFloatStateOf(0f) }
+    var videoVisible by remember { mutableStateOf(true) }
+    var videoScale by remember { mutableFloatStateOf(0.32f) }
+    var videoX by remember { mutableIntStateOf(16) }
+    var videoY by remember { mutableIntStateOf(16) }
     val lyricListState = rememberLazyListState()
     val exo = remember { ExoPlayer.Builder(context).build() }
 
     DisposableEffect(exo) { onDispose { exo.release() } }
-    BackHandler {
-        if (selected != null) { exo.stop(); selected = null } else onBack()
+    BackHandler(enabled = fullscreenPlayback || selected != null) {
+        if (fullscreenPlayback) {
+            fullscreenPlayback = false
+        } else if (selected != null) {
+            exo.stop()
+            selected = null
+        } else onBack()
+    }
+
+    val activity = context as? Activity
+    DisposableEffect(fullscreenPlayback) {
+        val window = activity?.window
+        val decor = window?.decorView
+        val oldOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val oldUiVisibility = decor?.systemUiVisibility ?: 0
+        if (fullscreenPlayback) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            decor?.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+        }
+        onDispose {
+            if (fullscreenPlayback) {
+                activity?.requestedOrientation = oldOrientation
+                decor?.systemUiVisibility = oldUiVisibility
+            }
+        }
+    }
+
+    LaunchedEffect(fullscreenPlayback, playbackControlsVisible, playbackControlsReset) {
+        if (fullscreenPlayback && playbackControlsVisible) {
+            delay(3500)
+            playbackControlsVisible = false
+        }
     }
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -206,6 +257,172 @@ fun LocalMediaPlayerScreen(
     }
     val hasPermission = rootUri != null && DocumentFile.fromTreeUri(context, Uri.parse(rootUri!!)) != null
 
+    if (fullscreenPlayback) {
+        BoxWithConstraints(
+            Modifier.fillMaxSize().background(Color.Black)
+                .pointerInput(fullscreenPlayback) {
+                    detectTapGestures {
+                        playbackControlsVisible = true
+                        playbackControlsReset++
+                    }
+                }
+                .pointerInput(fullscreenPlayback) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            gestureSide = if (offset.x < size.width / 2f) "BRIGHTNESS" else "VOLUME"
+                            gestureValue = 0f
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val activityWindow = activity?.window
+                            val maxVolume = (context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager)
+                                .getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                            if (gestureSide == "BRIGHTNESS") {
+                                val current = activityWindow?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f
+                                val next = (current - dragAmount.y / size.height * 1.2f).coerceIn(0.01f, 1f)
+                                activityWindow?.attributes = activityWindow.attributes.apply { screenBrightness = next }
+                                gestureValue = next
+                            } else {
+                                val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                                val current = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                                val next = (current - dragAmount.y / size.height * maxVolume * 1.2f).roundToInt().coerceIn(0, maxVolume)
+                                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, next, 0)
+                                gestureValue = next.toFloat() / maxVolume
+                            }
+                        },
+                        onDragEnd = { gestureSide = "" },
+                        onDragCancel = { gestureSide = "" }
+                    )
+                }
+        ) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val currentTrack = selected
+            val lyricIndex = lyrics.indexOfLast { it.timeMs <= (position - syncOffsetMs).coerceAtLeast(0L) }.coerceAtLeast(0)
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (lyrics.isNotEmpty()) {
+                    if (lyricIndex > 0) Text(
+                        lyrics[lyricIndex - 1].text, color = Color.White.copy(alpha = 0.42f),
+                        fontSize = 22.sp, textAlign = TextAlign.Center, maxLines = 2
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Text(lyrics[lyricIndex].text, color = lyricColor, fontSize = 46.sp,
+                        fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 3)
+                    if (lyricIndex < lyrics.lastIndex) {
+                        Spacer(Modifier.height(20.dp))
+                        Text(lyrics[lyricIndex + 1].text, color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 22.sp, textAlign = TextAlign.Center, maxLines = 2)
+                    }
+                } else {
+                    Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
+                }
+            }
+
+            if (currentTrack?.isVideo == true && videoVisible) {
+                val popupWidth = maxWidth * videoScale
+                val popupHeight = popupWidth * 9f / 16f
+                Box(
+                    Modifier.offset { IntOffset(videoX, videoY) }
+                        .width(popupWidth).height(popupHeight)
+                        .background(Color(0xFF151515), RoundedCornerShape(10.dp))
+                        .pointerInput(fullscreenPlayback) {
+                            detectDragGestures { change, drag ->
+                                change.consume()
+                                videoX = (videoX + drag.x.roundToInt()).coerceIn(0, (constraints.maxWidth - size.width).coerceAtLeast(0))
+                                videoY = (videoY + drag.y.roundToInt()).coerceIn(0, (constraints.maxHeight - size.height).coerceAtLeast(0))
+                            }
+                        }
+                ) {
+                    AndroidView(
+                        factory = { PlayerView(it).apply { player = exo; useController = false } },
+                        update = { it.player = exo },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (playbackControlsVisible) {
+                        Surface(
+                            Modifier.align(Alignment.TopEnd).padding(3.dp).size(25.dp),
+                            shape = RoundedCornerShape(50), color = Color(0xCC10120F)
+                        ) {
+                            IconButton(onClick = { videoVisible = false }, modifier = Modifier.fillMaxSize()) {
+                                Text("×", color = Color.White, fontSize = 17.sp, lineHeight = 17.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (playbackControlsVisible) {
+                TextButton(
+                    onClick = {
+                        fullscreenPlayback = false
+                        playbackControlsVisible = true
+                        playbackControlsReset++
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+                ) { Text("EXIT", color = Color.White, fontWeight = FontWeight.Bold) }
+
+                if (currentTrack?.isVideo == true && videoVisible) {
+                    Surface(
+                        Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 78.dp)
+                            .width(170.dp),
+                        color = Color(0xCC20251E), shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                            Text("VIDEO SIZE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Slider(value = videoScale, onValueChange = { videoScale = it }, valueRange = 0.22f..0.60f)
+                        }
+                    }
+                }
+                Row(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val trackIndex = currentTrack?.let { items.indexOf(it) } ?: -1
+                    IconButton(onClick = {
+                        items.getOrNull(trackIndex - 1)?.let {
+                            selected = it; videoVisible = it.isVideo; videoX = 16; videoY = 16
+                            exo.setMediaItem(MediaItem.fromUri(it.uri)); exo.prepare(); exo.play()
+                        }
+                    }) { Icon(Icons.Default.SkipPrevious, null, tint = Color.White) }
+                    Spacer(Modifier.width(30.dp))
+                    FilledIconButton(onClick = { if (exo.isPlaying) exo.pause() else exo.play() },
+                        modifier = Modifier.size(54.dp)) {
+                        Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null)
+                    }
+                    Spacer(Modifier.width(30.dp))
+                    IconButton(onClick = {
+                        items.getOrNull(trackIndex + 1)?.let {
+                            selected = it; videoVisible = it.isVideo; videoX = 16; videoY = 16
+                            exo.setMediaItem(MediaItem.fromUri(it.uri)); exo.prepare(); exo.play()
+                        }
+                    }) { Icon(Icons.Default.SkipNext, null, tint = Color.White) }
+                }
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 24.dp, vertical = 72.dp)) {
+                    Slider(
+                        value = if (duration > 0) position.coerceIn(0, duration).toFloat() else 0f,
+                        onValueChange = { seeking = true; position = it.toLong() },
+                        onValueChangeFinished = { exo.seekTo(position); seeking = false },
+                        valueRange = 0f..duration.coerceAtLeast(1L).toFloat()
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatLocalTime(position), color = Color.White, fontSize = 10.sp)
+                        Text(formatLocalTime(duration), color = Color.White, fontSize = 10.sp)
+                    }
+                }
+            }
+            if (gestureSide.isNotBlank()) {
+                Surface(Modifier.align(if (gestureSide == "BRIGHTNESS") Alignment.CenterStart else Alignment.CenterEnd)
+                    .padding(18.dp), color = Color(0xDD252B23), shape = RoundedCornerShape(14.dp)) {
+                    Text("${if (gestureSide == "BRIGHTNESS") "☀" else "♪"}  ${(gestureValue * 100).toInt()}%",
+                        Modifier.padding(14.dp), color = Color.White)
+                }
+            }
+        }
+    } else {
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 16.dp)
@@ -362,9 +579,24 @@ fun LocalMediaPlayerScreen(
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(track.artist.ifBlank { "Local media" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Button(onClick = {
+                    videoVisible = track.isVideo
+                    videoScale = 0.32f
+                    videoX = 16
+                    videoY = 16
+                    playbackControlsVisible = true
+                    playbackControlsReset++
+                    fullscreenPlayback = true
+                }, enabled = lyrics.isNotEmpty(), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)) {
+                    Text("PLAYBACK", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             Spacer(Modifier.height(7.dp))
-            Text(track.title, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist.ifBlank { "Local media" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(
                 value = if (duration > 0) position.coerceIn(0, duration).toFloat() else 0f,
                 onValueChange = { seeking = true; position = it.toLong() },
@@ -440,6 +672,7 @@ fun LocalMediaPlayerScreen(
                 }
             }
         }
+    }
     }
 }
 
