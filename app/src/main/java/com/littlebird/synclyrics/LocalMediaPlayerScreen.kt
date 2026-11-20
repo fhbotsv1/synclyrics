@@ -122,16 +122,24 @@ fun LocalMediaPlayerScreen(
     var videoX by remember { mutableIntStateOf(16) }
     var videoY by remember { mutableIntStateOf(16) }
     val lyricListState = rememberLazyListState()
-    val exo = remember { ExoPlayer.Builder(context).build() }
+    var exo by remember { mutableStateOf(ExoPlayer.Builder(context).build()) }
+    var standbyExo by remember { mutableStateOf(ExoPlayer.Builder(context).build()) }
+    var crossfadeSeconds by remember { mutableIntStateOf(playerPrefs.getInt("crossfade_seconds", 5)) }
+    var showCrossfadeSettings by remember { mutableStateOf(false) }
+    var crossfading by remember { mutableStateOf(false) }
 
-    DisposableEffect(exo) { onDispose { exo.release() } }
-    DisposableEffect(exo, selected?.uri, items) {
+    DisposableEffect(Unit) {
+        onDispose { exo.release(); standbyExo.release() }
+    }
+    DisposableEffect(exo, selected?.uri, items, crossfading) {
         val currentTrack = selected
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == androidx.media3.common.Player.STATE_ENDED && currentTrack != null) {
                     val currentIndex = items.indexOfFirst { it.uri == currentTrack.uri }
                     val nextTrack = items.getOrNull(currentIndex + 1) ?: return
+                    standbyExo.stop()
+                    standbyExo.volume = 1f
                     selected = nextTrack
                     videoVisible = nextTrack.isVideo
                     videoX = 16
@@ -145,6 +153,50 @@ fun LocalMediaPlayerScreen(
         }
         exo.addListener(listener)
         onDispose { exo.removeListener(listener) }
+    }
+
+    LaunchedEffect(exo, selected?.uri, crossfadeSeconds, items) {
+        while (true) {
+            val track = selected
+            val active = exo
+            val fadeMs = crossfadeSeconds * 1000L
+            if (crossfadeSeconds > 0 && track != null && !track.isVideo &&
+                active.isPlaying && !crossfading && active.duration > fadeMs + 1000L) {
+                val remaining = active.duration - active.currentPosition
+                val index = items.indexOfFirst { it.uri == track.uri }
+                val nextTrack = items.getOrNull(index + 1)
+                if (remaining in 1L..fadeMs && nextTrack != null && !nextTrack.isVideo) {
+                    crossfading = true
+                    val incoming = standbyExo
+                    incoming.stop()
+                    incoming.clearMediaItems()
+                    incoming.volume = 0f
+                    incoming.setMediaItem(MediaItem.fromUri(nextTrack.uri))
+                    incoming.prepare()
+                    incoming.playWhenReady = true
+                    val steps = 40
+                    repeat(steps) { step ->
+                        val progress = (step + 1).toFloat() / steps
+                        active.volume = 1f - progress
+                        incoming.volume = progress
+                        delay((fadeMs / steps).coerceAtLeast(20L))
+                    }
+                    active.pause()
+                    active.stop()
+                    active.clearMediaItems()
+                    active.volume = 1f
+                    exo = incoming
+                    standbyExo = active
+                    selected = nextTrack
+                    videoVisible = false
+                    position = 0L
+                    duration = incoming.duration.takeIf { it > 0L } ?: nextTrack.duration
+                    incoming.volume = 1f
+                    crossfading = false
+                }
+            }
+            delay(100)
+        }
     }
 
     val activity = context as? Activity
@@ -474,6 +526,7 @@ fun LocalMediaPlayerScreen(
                     val trackIndex = currentTrack?.let { items.indexOf(it) } ?: -1
                     IconButton(onClick = {
                         items.getOrNull(trackIndex - 1)?.let {
+                            standbyExo.stop(); standbyExo.volume = 1f; crossfading = false; exo.volume = 1f
                             selected = it; videoVisible = it.isVideo; videoX = 16; videoY = 16
                             exo.setMediaItem(MediaItem.fromUri(it.uri)); exo.prepare(); exo.play()
                         }
@@ -519,13 +572,20 @@ fun LocalMediaPlayerScreen(
     ) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = {
-                if (selected != null) { exo.stop(); selected = null }
+                if (selected != null) {
+                    exo.stop(); standbyExo.stop(); crossfading = false; selected = null
+                }
                 else onBack()
             }) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
             Text(if (selected == null) "LOCAL PLAYER" else "NOW PLAYING",
                 Modifier.weight(1f), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold,
                 letterSpacing = 1.3.sp, color = MaterialTheme.colorScheme.primary)
-            if (selected != null) TextButton(onClick = { exo.stop(); selected = null }) { Text("BROWSE") }
+            if (selected != null) {
+                TextButton(onClick = { showCrossfadeSettings = true }) { Text("CROSSFADE") }
+                TextButton(onClick = {
+                    exo.stop(); standbyExo.stop(); crossfading = false; selected = null
+                }) { Text("BROWSE") }
+            }
         }
 
         if (selected == null) {
@@ -573,6 +633,10 @@ fun LocalMediaPlayerScreen(
                 else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
                     items(filtered, key = { it.uri.toString() }) { item ->
                         Row(Modifier.fillMaxWidth().clickable {
+                            standbyExo.stop()
+                            standbyExo.volume = 1f
+                            crossfading = false
+                            exo.volume = 1f
                             selected = item
                             position = 0L
                             exo.setMediaItem(MediaItem.fromUri(item.uri))
@@ -713,6 +777,7 @@ fun LocalMediaPlayerScreen(
                 IconButton(onClick = {
                     val index = items.indexOf(track)
                     items.getOrNull(index - 1)?.let {
+                        standbyExo.stop(); standbyExo.volume = 1f; crossfading = false; exo.volume = 1f
                         selected = it; exo.setMediaItem(MediaItem.fromUri(it.uri)); exo.prepare(); exo.play()
                     }
                 }) { Icon(Icons.Default.SkipPrevious, "Previous") }
@@ -751,6 +816,39 @@ fun LocalMediaPlayerScreen(
                     }) { Text("↓ SAVE LYRICS OFFLINE") }
                 }
             }
+            if (showCrossfadeSettings) {
+                AlertDialog(
+                    onDismissRequest = { showCrossfadeSettings = false },
+                    title = { Text("Crossfade") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Blend the end of one song into the beginning of the next.")
+                            listOf(0, 3, 5, 8, 10).forEach { seconds ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        crossfadeSeconds = seconds
+                                        playerPrefs.edit().putInt("crossfade_seconds", seconds).apply()
+                                    }.padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = crossfadeSeconds == seconds,
+                                        onClick = {
+                                            crossfadeSeconds = seconds
+                                            playerPrefs.edit().putInt("crossfade_seconds", seconds).apply()
+                                        }
+                                    )
+                                    Text(if (seconds == 0) "Off" else "$seconds seconds")
+                                }
+                            }
+                            Text("Music only. Videos keep their normal playback behaviour.",
+                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showCrossfadeSettings = false }) { Text("DONE") } }
+                )
+            }
+
             if (lyrics.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
