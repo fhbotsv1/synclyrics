@@ -63,6 +63,8 @@ private fun requiredMediaPermissions(tab: String): Array<String> =
 fun LocalMediaPlayerScreen(
     library: PublicLyricsLibrary,
     permissionRefresh: Int,
+    syncOffsetMs: Int,
+    lyricColor: Color,
     onBack: () -> Unit,
     onRequestMediaPermissions: () -> Unit
 ) {
@@ -82,6 +84,7 @@ fun LocalMediaPlayerScreen(
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
+    var seeking by remember { mutableStateOf(false) }
     val lyricListState = rememberLazyListState()
     val exo = remember { ExoPlayer.Builder(context).build() }
 
@@ -204,14 +207,14 @@ fun LocalMediaPlayerScreen(
 
     LaunchedEffect(exo, selected?.uri) {
         while (true) {
-            position = exo.currentPosition.coerceAtLeast(0L)
+            if (!seeking) position = exo.currentPosition.coerceAtLeast(0L)
             duration = exo.duration.takeIf { it > 0L } ?: (selected?.duration ?: 0L)
             playing = exo.isPlaying
             delay(300)
         }
     }
 
-    val activeIndex = lyrics.indexOfLast { it.timeMs <= position }.coerceAtLeast(0)
+    val activeIndex = lyrics.indexOfLast { it.timeMs <= (position - syncOffsetMs).coerceAtLeast(0L) }.coerceAtLeast(0)
     LaunchedEffect(activeIndex, lyrics.size) {
         if (lyrics.isNotEmpty()) lyricListState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
     }
@@ -323,8 +326,8 @@ fun LocalMediaPlayerScreen(
             Text(track.artist.ifBlank { "Local media" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(
                 value = if (duration > 0) position.coerceIn(0, duration).toFloat() else 0f,
-                onValueChange = { position = it.toLong() },
-                onValueChangeFinished = { exo.seekTo(position) },
+                onValueChange = { seeking = true; position = it.toLong() },
+                onValueChangeFinished = { exo.seekTo(position); seeking = false },
                 valueRange = 0f..duration.coerceAtLeast(1L).toFloat()
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -390,7 +393,7 @@ fun LocalMediaPlayerScreen(
                         Text(lyrics[index].text, Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                             fontSize = if (index == activeIndex) 23.sp else 17.sp,
                             fontWeight = if (index == activeIndex) FontWeight.Bold else FontWeight.Medium,
-                            color = if (index == activeIndex) MaterialTheme.colorScheme.primary
+                            color = if (index == activeIndex) lyricColor
                                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
                     }
                 }
