@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,6 +69,7 @@ fun LocalMediaPlayerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf("Music") }
+    var selectedFolder by remember { mutableStateOf("All folders") }
     var items by remember { mutableStateOf(emptyList<LocalMediaItem>()) }
     var selected by remember { mutableStateOf<LocalMediaItem?>(null) }
     var search by remember { mutableStateOf("") }
@@ -117,8 +120,6 @@ fun LocalMediaPlayerScreen(
             items = withContext(Dispatchers.IO) {
                 val result = mutableListOf<LocalMediaItem>()
                 val video = tab == "Videos"
-                val collection = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                    else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
                 val folderColumn = if (android.os.Build.VERSION.SDK_INT >= 29)
                     MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
                 val projection = if (video) arrayOf(
@@ -133,25 +134,36 @@ fun LocalMediaPlayerScreen(
                 val selection = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
                 val sort = if (video) MediaStore.Video.Media.DISPLAY_NAME + " COLLATE NOCASE ASC"
                     else MediaStore.Audio.Media.TITLE + " COLLATE NOCASE ASC"
-                context.contentResolver.query(collection, projection, selection, null, sort)?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val titleCol = cursor.getColumnIndexOrThrow(if (video) MediaStore.Video.Media.TITLE else MediaStore.Audio.Media.TITLE)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DURATION)
-                    val folderCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-                    val artistCol = if (video) -1 else cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                    while (cursor.moveToNext()) {
-                        val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
-                            ?: cursor.getString(nameCol)?.substringBeforeLast('.') ?: "Unknown"
-                        result += LocalMediaItem(
-                            Uri.withAppendedPath(collection, cursor.getLong(idCol).toString()),
-                            title,
-                            if (video) "" else cursor.getString(artistCol).orEmpty().takeUnless { it == "<unknown>" }.orEmpty(),
-                            cursor.getLong(durationCol),
-                            cursor.getString(folderCol).orEmpty().let {
-                                if (android.os.Build.VERSION.SDK_INT < 29) it.substringBeforeLast('/', "") else it
-                            }, video
-                        )
+                val collections = if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    MediaStore.getExternalVolumeNames(context).map { volume ->
+                        if (video) MediaStore.Video.Media.getContentUri(volume)
+                        else MediaStore.Audio.Media.getContentUri(volume)
+                    }
+                } else listOf(
+                    if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                )
+                collections.forEach { collection ->
+                    context.contentResolver.query(collection, projection, selection, null, sort)?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        val titleCol = cursor.getColumnIndexOrThrow(if (video) MediaStore.Video.Media.TITLE else MediaStore.Audio.Media.TITLE)
+                        val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                        val durationCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DURATION)
+                        val folderCol = cursor.getColumnIndexOrThrow(folderColumn)
+                        val artistCol = if (video) -1 else cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                        while (cursor.moveToNext()) {
+                            val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
+                                ?: cursor.getString(nameCol)?.substringBeforeLast('.') ?: "Unknown"
+                            result += LocalMediaItem(
+                                Uri.withAppendedPath(collection, cursor.getLong(idCol).toString()),
+                                title,
+                                if (video) "" else cursor.getString(artistCol).orEmpty().takeUnless { it == "<unknown>" }.orEmpty(),
+                                cursor.getLong(durationCol),
+                                cursor.getString(folderCol).orEmpty().let {
+                                    if (android.os.Build.VERSION.SDK_INT < 29) it.substringBeforeLast('/', "") else it
+                                }, video
+                            )
+                        }
                     }
                 }
                 result
@@ -200,9 +212,11 @@ fun LocalMediaPlayerScreen(
     LaunchedEffect(activeIndex, lyrics.size) {
         if (lyrics.isNotEmpty()) lyricListState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
     }
+    val folders = listOf("All folders") + items.map { it.folder }.filter { it.isNotBlank() }.distinct().sorted()
     val filtered = items.filter {
-        search.isBlank() || it.title.contains(search, true) ||
-            it.artist.contains(search, true) || it.folder.contains(search, true)
+        (selectedFolder == "All folders" || it.folder == selectedFolder) &&
+            (search.isBlank() || it.title.contains(search, true) ||
+                it.artist.contains(search, true) || it.folder.contains(search, true))
     }
     val hasPermission = requiredMediaPermissions(tab).all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -226,10 +240,17 @@ fun LocalMediaPlayerScreen(
         if (selected == null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Music", "Videos").forEach { name ->
-                    FilterChip(selected = tab == name, onClick = { tab = name; search = "" }, label = { Text(name) })
+                    FilterChip(selected = tab == name, onClick = { tab = name; search = ""; selectedFolder = "All folders" }, label = { Text(name) })
                 }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { scan() }) { Text("RESCAN") }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                folders.forEach { folder ->
+                    FilterChip(selected = selectedFolder == folder, onClick = { selectedFolder = folder },
+                        label = { Text(if (folder == "All folders") folder else folder.trimEnd('/').substringAfterLast('/', folder)) })
+                }
             }
             OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(),
                 singleLine = true, placeholder = { Text("Search title, artist or folder") },
