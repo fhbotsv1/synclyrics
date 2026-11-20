@@ -928,8 +928,8 @@ private fun publishArtworkToDownloads(context: android.content.Context, source: 
         val relativePath = Environment.DIRECTORY_DOWNLOADS + "/SyncLyrics/Artwork"
         val existing = resolver.query(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Downloads._ID),
-            "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
             arrayOf(fileName, relativePath + "/"),
             null
         )?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
@@ -937,9 +937,9 @@ private fun publishArtworkToDownloads(context: android.content.Context, source: 
             android.content.ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, existing)
         } else {
             val values = android.content.ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
             }
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
         } ?: return
