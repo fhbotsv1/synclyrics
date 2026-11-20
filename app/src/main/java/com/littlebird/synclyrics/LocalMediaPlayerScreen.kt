@@ -7,6 +7,13 @@ import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -29,12 +36,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -315,10 +326,61 @@ fun LocalMediaPlayerScreen(
                         .background(Color.Black, RoundedCornerShape(14.dp))
                 )
             } else {
-                Box(Modifier.fillMaxWidth().height(145.dp)
-                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.AudioFile, null, Modifier.size(70.dp), tint = MaterialTheme.colorScheme.primary)
+                val rotation = rememberInfiniteTransition(label = "vinylRotation")
+                    .animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 6000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "vinylAngle"
+                    )
+                Box(
+                    Modifier.fillMaxWidth().height(145.dp)
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // The record spins continuously while the tonearm stays in place.
+                    Canvas(
+                        Modifier.size(128.dp).graphicsLayer { rotationZ = rotation.value }
+                    ) {
+                        val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                        val radius = size.minDimension * 0.47f
+                        drawCircle(Color(0xFF171A18), radius, center)
+                        for (index in 1..9) {
+                            val grooveRadius = radius * (0.43f + index * 0.052f)
+                            drawCircle(
+                                color = Color.White.copy(alpha = if (index % 3 == 0) 0.19f else 0.09f),
+                                radius = grooveRadius,
+                                center = center,
+                                style = Stroke(width = 1.dp.toPx())
+                            )
+                        }
+                        drawArc(
+                            color = Color.White.copy(alpha = 0.22f),
+                            startAngle = 205f,
+                            sweepAngle = 82f,
+                            useCenter = false,
+                            topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.88f, center.y - radius * 0.88f),
+                            size = androidx.compose.ui.geometry.Size(radius * 1.76f, radius * 1.76f),
+                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                        drawCircle(MaterialTheme.colorScheme.primary, radius * 0.29f, center)
+                        drawCircle(Color(0xFF263128), radius * 0.19f, center)
+                        drawCircle(Color(0xFFB8F36B), radius * 0.035f,
+                            androidx.compose.ui.geometry.Offset(center.x + radius * 0.19f, center.y - radius * 0.12f))
+                        drawCircle(Color(0xFF080A09), radius * 0.055f, center)
+                    }
+                    Canvas(Modifier.size(145.dp)) {
+                        val start = androidx.compose.ui.geometry.Offset(size.width * 0.86f, size.height * 0.13f)
+                        val elbow = androidx.compose.ui.geometry.Offset(size.width * 0.78f, size.height * 0.22f)
+                        val end = androidx.compose.ui.geometry.Offset(size.width * 0.69f, size.height * 0.38f)
+                        drawLine(Color(0xFF9EA69F), start, elbow, strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(Color(0xFF737D75), elbow, end, strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+                        drawCircle(Color(0xFFB8F36B), 4.dp.toPx(), start)
+                        drawCircle(Color(0xFFBEC5BF), 3.dp.toPx(), end)
+                    }
                 }
             }
             Spacer(Modifier.height(7.dp))
