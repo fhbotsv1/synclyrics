@@ -125,6 +125,28 @@ fun LocalMediaPlayerScreen(
     val exo = remember { ExoPlayer.Builder(context).build() }
 
     DisposableEffect(exo) { onDispose { exo.release() } }
+    DisposableEffect(exo, selected?.uri, items) {
+        val currentTrack = selected
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED && currentTrack != null) {
+                    val currentIndex = items.indexOfFirst { it.uri == currentTrack.uri }
+                    val nextTrack = items.getOrNull(currentIndex + 1) ?: return
+                    selected = nextTrack
+                    videoVisible = nextTrack.isVideo
+                    videoX = 16
+                    videoY = 16
+                    position = 0L
+                    exo.setMediaItem(MediaItem.fromUri(nextTrack.uri))
+                    exo.prepare()
+                    exo.play()
+                }
+            }
+        }
+        exo.addListener(listener)
+        onDispose { exo.removeListener(listener) }
+    }
+
     val activity = context as? Activity
     val originalWindowBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
 
