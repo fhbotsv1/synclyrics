@@ -141,7 +141,7 @@ fun LocalMediaPlayerScreen(
         }
         onDispose {
             if (fullscreenPlayback) {
-                activity?.requestedOrientation = oldOrientation
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 decor?.systemUiVisibility = oldUiVisibility
                 activity?.window?.let { window ->
                     val attributes = window.attributes
