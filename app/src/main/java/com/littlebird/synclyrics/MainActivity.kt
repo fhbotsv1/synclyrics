@@ -620,6 +620,8 @@ class MainActivity : ComponentActivity() {
                     LocalMediaPlayerScreen(
                         library = publicLibrary,
                         permissionRefresh = mediaPermissionRefresh,
+                        syncOffsetMs = syncOffsetMs,
+                        lyricColor = lyricColor,
                         onBack = { localPlayerMode = false },
                         onRequestMediaPermissions = {
                             val permissions = if (Build.VERSION.SDK_INT >= 33) {
