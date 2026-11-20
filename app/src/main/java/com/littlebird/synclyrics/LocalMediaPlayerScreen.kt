@@ -1,9 +1,9 @@
 package com.littlebird.synclyrics
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.provider.MediaStore
+import android.content.Intent
+import androidx.documentfile.provider.DocumentFile
+import android.media.MediaMetadataRetriever
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -81,6 +80,9 @@ fun LocalMediaPlayerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val playerPrefs = remember { context.getSharedPreferences("local_player_settings", android.content.Context.MODE_PRIVATE) }
+    var rootUri by remember { mutableStateOf(playerPrefs.getString("default_folder_uri", null)) }
+    var rootLabel by remember { mutableStateOf(playerPrefs.getString("default_folder_name", null) ?: "No folder selected") }
     var tab by remember { mutableStateOf("Music") }
     var selectedFolder by remember { mutableStateOf("All folders") }
     var items by remember { mutableStateOf(emptyList<LocalMediaItem>()) }
@@ -102,6 +104,23 @@ fun LocalMediaPlayerScreen(
     DisposableEffect(exo) { onDispose { exo.release() } }
     BackHandler {
         if (selected != null) { exo.stop(); selected = null } else onBack()
+    }
+
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val folderName = DocumentFile.fromTreeUri(context, uri)?.name ?: "Selected folder"
+            rootUri = uri.toString()
+            rootLabel = folderName
+            playerPrefs.edit()
+                .putString("default_folder_uri", uri.toString())
+                .putString("default_folder_name", folderName)
+                .apply()
+            selectedFolder = "All folders"
+            search = ""
+        }
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -126,68 +145,23 @@ fun LocalMediaPlayerScreen(
     }
 
     fun scan() {
-        val permitted = requiredMediaPermissions(tab).all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        val savedTree = rootUri?.let(Uri::parse)
+        if (savedTree == null) {
+            items = emptyList()
+            scanning = false
+            return
         }
-        if (!permitted) { scanning = false; return }
         scope.launch {
             scanning = true
             items = withContext(Dispatchers.IO) {
-                val result = mutableListOf<LocalMediaItem>()
-                val video = tab == "Videos"
-                val folderColumn = if (android.os.Build.VERSION.SDK_INT >= 29)
-                    MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
-                val projection = if (video) arrayOf(
-                    MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE,
-                    MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.DURATION,
-                    folderColumn
-                ) else arrayOf(
-                    MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE,
-                    MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.DISPLAY_NAME,
-                    MediaStore.Audio.Media.DURATION, folderColumn
-                )
-                val selection = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
-                val sort = if (video) MediaStore.Video.Media.DISPLAY_NAME + " COLLATE NOCASE ASC"
-                    else MediaStore.Audio.Media.TITLE + " COLLATE NOCASE ASC"
-                val collections = if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    MediaStore.getExternalVolumeNames(context).map { volume ->
-                        if (video) MediaStore.Video.Media.getContentUri(volume)
-                        else MediaStore.Audio.Media.getContentUri(volume)
-                    }
-                } else listOf(
-                    if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                    else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                )
-                collections.forEach { collection ->
-                    context.contentResolver.query(collection, projection, selection, null, sort)?.use { cursor ->
-                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                        val titleCol = cursor.getColumnIndexOrThrow(if (video) MediaStore.Video.Media.TITLE else MediaStore.Audio.Media.TITLE)
-                        val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                        val durationCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DURATION)
-                        val folderCol = cursor.getColumnIndexOrThrow(folderColumn)
-                        val artistCol = if (video) -1 else cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                        while (cursor.moveToNext()) {
-                            val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
-                                ?: cursor.getString(nameCol)?.substringBeforeLast('.') ?: "Unknown"
-                            result += LocalMediaItem(
-                                Uri.withAppendedPath(collection, cursor.getLong(idCol).toString()),
-                                title,
-                                if (video) "" else cursor.getString(artistCol).orEmpty().takeUnless { it == "<unknown>" }.orEmpty(),
-                                cursor.getLong(durationCol),
-                                cursor.getString(folderCol).orEmpty().let {
-                                    if (android.os.Build.VERSION.SDK_INT < 29) it.substringBeforeLast('/', "") else it
-                                }, video
-                            )
-                        }
-                    }
-                }
-                result
+                runCatching { scanSelectedFolder(context, savedTree, tab == "Videos") }
+                    .getOrElse { emptyList() }
             }
             scanning = false
         }
     }
 
-    LaunchedEffect(tab, permissionRefresh) { scan() }
+    LaunchedEffect(tab, permissionRefresh, rootUri) { scan() }
 
     LaunchedEffect(selected?.uri) {
         val track = selected ?: run {
@@ -235,9 +209,7 @@ fun LocalMediaPlayerScreen(
             (search.isBlank() || it.title.contains(search, true) ||
                 it.artist.contains(search, true) || it.folder.contains(search, true))
     }
-    val hasPermission = requiredMediaPermissions(tab).all {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
+    val hasPermission = rootUri != null && DocumentFile.fromTreeUri(context, Uri.parse(rootUri!!)) != null
 
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
@@ -255,6 +227,17 @@ fun LocalMediaPlayerScreen(
         }
 
         if (selected == null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("DEFAULT FOLDER", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(rootLabel, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = { folderPicker.launch(rootUri?.let(Uri::parse)) }) {
+                    Text(if (rootUri == null) "CHOOSE FOLDER" else "CHANGE")
+                }
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Music", "Videos").forEach { name ->
                     FilterChip(selected = tab == name, onClick = { tab = name; search = ""; selectedFolder = "All folders" }, label = { Text(name) })
@@ -276,13 +259,13 @@ fun LocalMediaPlayerScreen(
             when {
                 !hasPermission -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Allow access to music and videos stored on this device.")
-                        Button(onClick = onRequestMediaPermissions) { Text("GRANT MEDIA ACCESS") }
+                        Text("Choose a default folder to browse your music and videos.")
+                        Button(onClick = { folderPicker.launch(null) }) { Text("CHOOSE DEFAULT FOLDER") }
                     }
                 }
                 scanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 filtered.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (search.isBlank()) "No " + tab.lowercase() + " found on this device." else "No matching files found.",
+                    Text(if (search.isBlank()) "No " + tab.lowercase() + " found in this folder or its subfolders." else "No matching files found.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -463,6 +446,63 @@ fun LocalMediaPlayerScreen(
             }
         }
     }
+}
+
+private fun scanSelectedFolder(
+    context: android.content.Context,
+    treeUri: Uri,
+    videosOnly: Boolean
+): List<LocalMediaItem> {
+    val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+    val results = mutableListOf<LocalMediaItem>()
+    val audioExtensions = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "3gp", "amr")
+    val videoExtensions = setOf("mp4", "mkv", "webm", "avi", "mov", "3gp", "mpeg", "mpg", "m4v", "ts")
+
+    fun visit(directory: DocumentFile, relativePath: String, depth: Int) {
+        if (depth > 20) return
+        val children = runCatching { directory.listFiles().toList() }.getOrDefault(emptyList())
+        children.forEach { file ->
+            if (file.isDirectory) {
+                val name = file.name ?: return@forEach
+                visit(file, if (relativePath.isBlank()) name else "$relativePath/$name", depth + 1)
+            } else if (file.isFile) {
+                val name = file.name ?: return@forEach
+                val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                val mime = file.type.orEmpty()
+                val isVideo = mime.startsWith("video/") || extension in videoExtensions
+                val isAudio = mime.startsWith("audio/") || extension in audioExtensions
+                if ((videosOnly && !isVideo) || (!videosOnly && !isAudio)) return@forEach
+
+                var title = name.substringBeforeLast('.', name)
+                var artist = ""
+                var duration = 0L
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, file.uri)
+                    title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                        ?.takeIf { it.isNotBlank() } ?: title
+                    if (!isVideo) {
+                        artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST).orEmpty()
+                            .takeUnless { it == "<unknown>" }.orEmpty()
+                    }
+                    duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull() ?: 0L
+                } catch (_: Exception) {
+                    // Some document providers do not expose metadata; filename remains usable.
+                } finally {
+                    runCatching { retriever.release() }
+                }
+                results += LocalMediaItem(
+                    file.uri, title, artist, duration,
+                    if (relativePath.isBlank()) root.name ?: "Selected folder" else relativePath,
+                    isVideo
+                )
+            }
+        }
+    }
+
+    visit(root, "", 0)
+    return results.sortedBy { it.title.lowercase(Locale.ROOT) }
 }
 
 private fun parseLocalLrc(source: String): List<LyricLine> {
