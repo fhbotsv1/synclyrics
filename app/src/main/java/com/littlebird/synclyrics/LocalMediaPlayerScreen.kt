@@ -114,13 +114,26 @@ fun LocalMediaPlayerScreen(
     val exo = remember { ExoPlayer.Builder(context).build() }
 
     DisposableEffect(exo) { onDispose { exo.release() } }
+    fun exitLocalFullscreen() {
+        // Restore the Activity immediately, rather than relying only on Compose disposal.
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        activity?.window?.decorView?.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+        activity?.window?.let { window ->
+            val attributes = window.attributes
+            attributes.screenBrightness = originalWindowBrightness
+            window.attributes = attributes
+        }
+        fullscreenPlayback = false
+        playbackControlsVisible = true
+    }
+
     BackHandler(enabled = fullscreenPlayback || selected != null) {
         if (fullscreenPlayback) {
-            fullscreenPlayback = false
+            exitLocalFullscreen()
         } else if (selected != null) {
             exo.stop()
             selected = null
-        } else onBack()
+        }
     }
 
     val activity = context as? Activity
@@ -141,8 +154,9 @@ fun LocalMediaPlayerScreen(
         }
         onDispose {
             if (fullscreenPlayback) {
+                // Always leave this screen in portrait; this also covers system/back exits.
                 activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                decor?.systemUiVisibility = oldUiVisibility
+                decor?.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
                 activity?.window?.let { window ->
                     val attributes = window.attributes
                     attributes.screenBrightness = originalWindowBrightness
@@ -370,8 +384,7 @@ fun LocalMediaPlayerScreen(
             if (playbackControlsVisible) {
                 TextButton(
                     onClick = {
-                        fullscreenPlayback = false
-                        playbackControlsVisible = true
+                        exitLocalFullscreen()
                         playbackControlsReset++
                     },
                     modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
