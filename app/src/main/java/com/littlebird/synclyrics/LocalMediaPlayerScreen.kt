@@ -379,6 +379,23 @@ fun LocalMediaPlayerScreen(
                             }
                         }
                     }
+                    // Drag this corner handle horizontally to resize the video popup.
+                    Surface(
+                        Modifier.align(Alignment.BottomEnd).padding(5.dp).size(30.dp)
+                            .pointerInput(containerWidthPx) {
+                                detectDragGestures { change, drag ->
+                                    change.consume()
+                                    videoScale = (videoScale + drag.x / containerWidthPx.coerceAtLeast(1))
+                                        .coerceIn(0.22f, 0.60f)
+                                }
+                            },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xDD10120F)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("↘", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
@@ -391,18 +408,6 @@ fun LocalMediaPlayerScreen(
                     modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
                 ) { Text("EXIT", color = Color.White, fontWeight = FontWeight.Bold) }
 
-                if (currentTrack?.isVideo == true && videoVisible) {
-                    Surface(
-                        Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 78.dp)
-                            .width(170.dp),
-                        color = Color(0xCC20251E), shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                            Text("VIDEO SIZE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Slider(value = videoScale, onValueChange = { videoScale = it }, valueRange = 0.22f..0.60f)
-                        }
-                    }
-                }
                 Row(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 14.dp),
                     horizontalArrangement = Arrangement.Center,
