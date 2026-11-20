@@ -336,6 +336,7 @@ fun LocalMediaPlayerScreen(
                         ),
                         label = "vinylAngle"
                     )
+                val recordAccent = MaterialTheme.colorScheme.primary
                 Box(
                     Modifier.fillMaxWidth().height(145.dp)
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)),
@@ -366,7 +367,7 @@ fun LocalMediaPlayerScreen(
                             size = androidx.compose.ui.geometry.Size(radius * 1.76f, radius * 1.76f),
                             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
                         )
-                        drawCircle(MaterialTheme.colorScheme.primary, radius * 0.29f, center)
+                        drawCircle(recordAccent, radius * 0.29f, center)
                         drawCircle(Color(0xFF263128), radius * 0.19f, center)
                         drawCircle(Color(0xFFB8F36B), radius * 0.035f,
                             androidx.compose.ui.geometry.Offset(center.x + radius * 0.19f, center.y - radius * 0.12f))
