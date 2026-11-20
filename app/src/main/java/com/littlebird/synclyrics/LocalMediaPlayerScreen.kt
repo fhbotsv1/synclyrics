@@ -114,6 +114,9 @@ fun LocalMediaPlayerScreen(
     val exo = remember { ExoPlayer.Builder(context).build() }
 
     DisposableEffect(exo) { onDispose { exo.release() } }
+    val activity = context as? Activity
+    val originalWindowBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
+
     fun exitLocalFullscreen() {
         // Restore the Activity immediately, rather than relying only on Compose disposal.
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -136,8 +139,6 @@ fun LocalMediaPlayerScreen(
         }
     }
 
-    val activity = context as? Activity
-    val originalWindowBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
     DisposableEffect(fullscreenPlayback) {
         val window = activity?.window
         val decor = window?.decorView
