@@ -326,23 +326,40 @@ fun LocalMediaPlayerScreen(
             val containerHeightPx = with(density) { maxHeight.roundToPx() }
             val currentTrack = selected
             val lyricIndex = lyrics.indexOfLast { it.timeMs <= (position - syncOffsetMs).coerceAtLeast(0L) }.coerceAtLeast(0)
+            // Keep the lyric group clear of the bottom transport area. The controls
+            // remain layered above the playback screen, so long lyrics can use the
+            // remaining space without colliding with the seek bar or buttons.
             Column(
-                Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 20.dp),
+                Modifier.fillMaxSize().padding(start = 36.dp, top = 20.dp, end = 36.dp, bottom = 142.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (lyrics.isNotEmpty()) {
                     if (lyricIndex > 0) Text(
                         lyrics[lyricIndex - 1].text, color = Color.White.copy(alpha = 0.42f),
-                        fontSize = 22.sp, textAlign = TextAlign.Center, maxLines = 2
+                        fontSize = 22.sp, lineHeight = 29.sp,
+                        textAlign = TextAlign.Center, maxLines = 2
                     )
-                    Spacer(Modifier.height(20.dp))
-                    Text(lyrics[lyricIndex].text, color = lyricColor, fontSize = 46.sp,
-                        fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 3)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        lyrics[lyricIndex].text,
+                        color = lyricColor,
+                        fontSize = 46.sp,
+                        lineHeight = 60.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3
+                    )
                     if (lyricIndex < lyrics.lastIndex) {
-                        Spacer(Modifier.height(20.dp))
-                        Text(lyrics[lyricIndex + 1].text, color = Color.White.copy(alpha = 0.65f),
-                            fontSize = 22.sp, textAlign = TextAlign.Center, maxLines = 2)
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            lyrics[lyricIndex + 1].text,
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 22.sp,
+                            lineHeight = 29.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2
+                        )
                     }
                 } else {
                     Text("No synced lyrics available", color = Color.White.copy(alpha = 0.65f))
