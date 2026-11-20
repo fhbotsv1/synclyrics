@@ -589,13 +589,17 @@ fun LocalMediaPlayerScreen(
                         .background(Color.Black, RoundedCornerShape(14.dp))
                 )
             } else if (artworkBitmap != null) {
-                Image(
-                    bitmap = artworkBitmap!!.asImageBitmap(),
-                    contentDescription = "Album artwork for ${track.title}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(145.dp)
-                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                )
+                Box(
+                    Modifier.fillMaxWidth().height(145.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = artworkBitmap!!.asImageBitmap(),
+                        contentDescription = "Album artwork for ${track.title}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(145.dp)
+                    )
+                }
             } else {
                 val rotation = rememberInfiniteTransition(label = "vinylRotation")
                     .animateFloat(
@@ -864,6 +868,7 @@ private suspend fun loadOrFetchLocalArtwork(
             val titleScore = if (title == wantedTitle) 4 else if (title.contains(wantedTitle) || wantedTitle.contains(title)) 2 else 0
             val artistScore = if (wantedArtist.isBlank()) 0 else if (artist == wantedArtist) 4
                 else if (artist.contains(wantedArtist) || wantedArtist.contains(artist)) 2 else 0
+            if (titleScore == 0 || (wantedArtist.isNotBlank() && artistScore == 0)) return@mapNotNull null
             (titleScore + artistScore) to item.optString("artworkUrl100")
         }.filter { candidate ->
             val itemScore = candidate.first
