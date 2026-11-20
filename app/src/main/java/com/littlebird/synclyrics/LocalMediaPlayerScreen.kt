@@ -1,6 +1,13 @@
 package com.littlebird.synclyrics
 
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.provider.MediaStore
+import android.os.Build
+import android.os.Environment
+import java.io.File
+import java.security.MessageDigest
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.view.View
@@ -21,6 +28,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -93,6 +103,7 @@ fun LocalMediaPlayerScreen(
     var search by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var lyrics by remember { mutableStateOf(emptyList<LyricLine>()) }
+    var artworkBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var lyricsMessage by remember { mutableStateOf("Choose a song to find its lyrics") }
     var lyricsLoading by remember { mutableStateOf(false) }
     var lyricsSaved by remember { mutableStateOf(false) }
@@ -256,6 +267,14 @@ fun LocalMediaPlayerScreen(
                 .onFailure { lyricsMessage = "Lyrics search failed. Check connection or import an LRC file." }
         }
         lyricsLoading = false
+    }
+
+    LaunchedEffect(selected?.uri, selected?.title, selected?.artist, selected?.isVideo) {
+        val track = selected
+        artworkBitmap = null
+        if (track != null && !track.isVideo) {
+            artworkBitmap = withContext(Dispatchers.IO) { loadOrFetchLocalArtwork(context, track) }
+        }
     }
 
     LaunchedEffect(exo, selected?.uri) {
@@ -569,6 +588,15 @@ fun LocalMediaPlayerScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp, max = 230.dp)
                         .background(Color.Black, RoundedCornerShape(14.dp))
                 )
+            } else if (artworkBitmap != null) {
+                Image(
+                    bitmap = artworkBitmap!!.asImageBitmap(),
+                    contentDescription = "Album artwork for ${track.title}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxWidth().height(145.dp)
+                        .padding(horizontal = 0.dp)
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+                )
             } else {
                 val rotation = rememberInfiniteTransition(label = "vinylRotation")
                     .animateFloat(
@@ -780,6 +808,136 @@ private fun scanSelectedFolder(
 
     visit(root, "", 0)
     return results.sortedBy { it.title.lowercase(Locale.ROOT) }
+}
+
+private suspend fun loadOrFetchLocalArtwork(
+    context: android.content.Context,
+    track: LocalMediaItem
+): Bitmap? = withContext(Dispatchers.IO) {
+    val cacheDir = File(context.filesDir, "artwork").apply { mkdirs() }
+    val cacheFile = File(cacheDir, artworkCacheName(track))
+    if (cacheFile.exists() && cacheFile.length() > 0L) {
+        BitmapFactory.decodeFile(cacheFile.absolutePath)?.let { return@withContext it }
+    }
+
+    // Embedded artwork always takes priority over an online match.
+    val embedded = runCatching {
+        MediaMetadataRetriever().let { retriever ->
+            try {
+                retriever.setDataSource(context, track.uri)
+                retriever.embeddedPicture?.let { bytes ->
+                    cacheFile.writeBytes(bytes)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }
+            } finally {
+                retriever.release()
+            }
+        }
+    }.getOrNull()
+    if (embedded != null) {
+        publishArtworkToDownloads(context, cacheFile, artworkCacheName(track))
+        return@withContext embedded
+    }
+
+    if (track.title.isBlank()) return@withContext null
+    val query = java.net.URLEncoder.encode(
+        listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" "),
+        "UTF-8"
+    )
+    val connection = runCatching {
+        (URL("https://itunes.apple.com/search?term=$query&entity=song&limit=8").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8000
+            readTimeout = 10000
+            setRequestProperty("User-Agent", "SyncLyrics/1.0 (Android)")
+        }
+    }.getOrNull() ?: return@withContext null
+
+    try {
+        if (connection.responseCode !in 200..299) return@withContext null
+        val json = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val results = json.optJSONArray("results") ?: return@withContext null
+        val wantedTitle = normalizeArtworkText(track.title)
+        val wantedArtist = normalizeArtworkText(track.artist)
+        val best = (0 until results.length()).mapNotNull { index ->
+            val item = results.optJSONObject(index) ?: return@mapNotNull null
+            val title = normalizeArtworkText(item.optString("trackName"))
+            val artist = normalizeArtworkText(item.optString("artistName"))
+            val titleScore = if (title == wantedTitle) 4 else if (title.contains(wantedTitle) || wantedTitle.contains(title)) 2 else 0
+            val artistScore = if (wantedArtist.isBlank()) 0 else if (artist == wantedArtist) 4
+                else if (artist.contains(wantedArtist) || wantedArtist.contains(artist)) 2 else 0
+            (titleScore + artistScore) to item.optString("artworkUrl100")
+        }.filter { it.first >= if (wantedArtist.isBlank()) 2 else 4 }
+            .maxByOrNull { it.first }?.second?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+            ?: return@withContext null
+
+        val largeUrl = best.replace(Regex("\\d+x\\d+bb"), "600x600bb")
+        val imageConnection = (URL(largeUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8000
+            readTimeout = 12000
+            setRequestProperty("User-Agent", "SyncLyrics/1.0 (Android)")
+        }
+        try {
+            if (imageConnection.responseCode !in 200..299) return@withContext null
+            val bytes = imageConnection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > 8 * 1024 * 1024) return@withContext null
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null
+            cacheFile.writeBytes(bytes)
+            publishArtworkToDownloads(context, cacheFile, artworkCacheName(track))
+            bitmap
+        } finally {
+            imageConnection.disconnect()
+        }
+    } catch (_: Exception) {
+        null
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun artworkCacheName(track: LocalMediaItem): String {
+    val key = "${normalizeArtworkText(track.title)}|${normalizeArtworkText(track.artist)}"
+    val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
+    return digest.joinToString("") { "%02x".format(it) } + ".jpg"
+}
+
+private fun normalizeArtworkText(value: String): String =
+    value.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+
+private fun publishArtworkToDownloads(context: android.content.Context, source: File, fileName: String) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !source.exists()) return
+    runCatching {
+        val resolver = context.contentResolver
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/SyncLyrics/Artwork"
+        val existing = resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+            arrayOf(fileName, relativePath + "/"),
+            null
+        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        val uri = if (existing != null) {
+            android.content.ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, existing)
+        } else {
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+            }
+            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        } ?: return
+        resolver.openOutputStream(uri, "wt")?.use { output -> source.inputStream().use { it.copyTo(output) } }
+    }
 }
 
 private fun parseLocalLrc(source: String): List<LyricLine> {
