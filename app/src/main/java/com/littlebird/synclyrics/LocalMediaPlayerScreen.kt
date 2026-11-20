@@ -801,6 +801,7 @@ fun LocalMediaPlayerScreen(
                 IconButton(onClick = {
                     val index = items.indexOf(track)
                     items.getOrNull(index + 1)?.let {
+                        standbyExo.stop(); standbyExo.volume = 1f; crossfading = false; exo.volume = 1f
                         selected = it; exo.setMediaItem(MediaItem.fromUri(it.uri)); exo.prepare(); exo.play()
                     }
                 }) { Icon(Icons.Default.SkipNext, "Next") }
