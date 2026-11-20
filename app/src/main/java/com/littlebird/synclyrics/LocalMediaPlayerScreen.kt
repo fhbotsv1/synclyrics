@@ -115,7 +115,7 @@ fun LocalMediaPlayerScreen(
         val permitted = requiredMediaPermissions(tab).all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
-        if (!permitted) { onRequestMediaPermissions(); return }
+        if (!permitted) { scanning = false; return }
         scope.launch {
             scanning = true
             items = withContext(Dispatchers.IO) {
