@@ -164,6 +164,11 @@ class MainActivity : ComponentActivity() {
         var isSaved by remember { mutableStateOf(false) }
         var showLibrary by remember { mutableStateOf(false) }
         var showSettings by remember { mutableStateOf(false) }
+        var localPlayerMode by remember { mutableStateOf(false) }
+        var mediaPermissionRefresh by remember { mutableIntStateOf(0) }
+        val mediaPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            mediaPermissionRefresh++
+        }
         val settingsPrefs = remember { context.getSharedPreferences("synclyrics_settings", Context.MODE_PRIVATE) }
         var syncOffsetMs by remember { mutableIntStateOf(settingsPrefs.getInt("lyrics_sync_offset_ms", 0).coerceIn(-5000, 5000)) }
         var multicolorVisualizer by remember { mutableStateOf(settingsPrefs.getBoolean("visualizer_multicolor", false)) }
@@ -611,6 +616,18 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                } else if (localPlayerMode) {
+                    LocalMediaPlayerScreen(
+                        library = publicLibrary,
+                        permissionRefresh = mediaPermissionRefresh,
+                        onBack = { localPlayerMode = false },
+                        onRequestMediaPermissions = {
+                            val permissions = if (Build.VERSION.SDK_INT >= 33) {
+                                arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.READ_MEDIA_VIDEO)
+                            } else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                            mediaPermissionLauncher.launch(permissions)
+                        }
+                    )
                 } else {
                 Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 18.dp, vertical = 12.dp)) {
                     Text(
@@ -641,6 +658,14 @@ class MainActivity : ComponentActivity() {
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp),
                             shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.filledTonalButtonColors()) {
                             Text("⚙ SETTINGS", fontSize = 11.sp, maxLines = 1)
+                        }
+                        Button(onClick = {
+                            localPlayerMode = true
+                            mediaPermissionRefresh++
+                        }, modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp),
+                            shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.filledTonalButtonColors()) {
+                            Text("PLAYER", fontSize = 11.sp, maxLines = 1)
                         }
                     }
                     Spacer(Modifier.height(5.dp))
