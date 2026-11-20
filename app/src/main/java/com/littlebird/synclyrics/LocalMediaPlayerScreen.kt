@@ -593,8 +593,7 @@ fun LocalMediaPlayerScreen(
                     bitmap = artworkBitmap!!.asImageBitmap(),
                     contentDescription = "Album artwork for ${track.title}",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().height(145.dp)
-                        .padding(horizontal = 0.dp)
+                    modifier = Modifier.size(145.dp)
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
                 )
             } else {
@@ -866,8 +865,11 @@ private suspend fun loadOrFetchLocalArtwork(
             val artistScore = if (wantedArtist.isBlank()) 0 else if (artist == wantedArtist) 4
                 else if (artist.contains(wantedArtist) || wantedArtist.contains(artist)) 2 else 0
             (titleScore + artistScore) to item.optString("artworkUrl100")
-        }.filter { it.first >= if (wantedArtist.isBlank()) 2 else 4 }
-            .maxByOrNull { it.first }?.second?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+        }.filter { candidate ->
+            val itemScore = candidate.first
+            if (wantedArtist.isBlank()) itemScore >= 2
+            else itemScore >= 4
+        }.maxByOrNull { it.first }?.second?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
             ?: return@withContext null
 
         val largeUrl = best.replace(Regex("\\d+x\\d+bb"), "600x600bb")
