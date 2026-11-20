@@ -64,11 +64,6 @@ private data class LocalMediaItem(
     val duration: Long, val folder: String, val isVideo: Boolean
 )
 
-private fun requiredMediaPermissions(tab: String): Array<String> =
-    if (android.os.Build.VERSION.SDK_INT >= 33) arrayOf(
-        if (tab == "Videos") Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_MEDIA_AUDIO
-    ) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-
 @Composable
 fun LocalMediaPlayerScreen(
     library: PublicLyricsLibrary,
